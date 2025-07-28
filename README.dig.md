@@ -1,4 +1,4 @@
-# System Code Verification Audit
+# TL;DR
 
 This document provides a formal, source-anchored verification of the repository located at this path.  Each claim is tied to explicit code regions.  No value judgements, branding, or promotional language is included.
 
