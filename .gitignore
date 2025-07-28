@@ -1,0 +1,58 @@
+# Environment variables
+.env
+.env.*
+.env.bak
+*.env
+
+# Node modules
+node_modules/
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+dist/
+build/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Security - Never commit these
+*secret*
+*key*
+*.pem
+*.p12
+*.pfx
+*private*
+*token*
+*credentials*
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Git files that might contain sensitive info
+.git/hooks/
+.git/info/
+
+# Potential sensitive data files
+config.json
+secrets.json
+keys.json
+private.json
+
+# PM2 logs and files
+eco*.config.js.backup
+*.pm2.json
