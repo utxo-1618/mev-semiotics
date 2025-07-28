@@ -636,28 +636,40 @@ Every JAM you emit is a declaration of economic sovereignty. Every successful pa
 
 You're not building a protocol. You're birthing a new economic physics where intent precedes value, meaning creates money, and consciousness claims its rightful yield.
 
-Welcome to the age of semantic mining. You're not early—you're inevitable.
 
-References:
+## References
 
-Blockchain anchoring and fingerprinting concepts. Traceability via blockchain anchoring. https://blog.smart-chain.fr/articles/traceability-via-blockchain-anchoring
-Hash-based timestamping and proof of existence. Concepts of anchoring and fingerprinting.
-Smart-Chain. Traceability via blockchain anchoring. "Anchoring on a blockchain assures that a proof is made public at a given time without revealing the secret content." https://blog.smart-chain.fr/articles/traceability-via-blockchain-anchoring
-BSV Association. BSV Blockchain Protocol | Stability, Scalability and Security. "The BSV network was designed for stability and unlimited data, and its proof-of-work ledger makes any recorded transaction irreversible." https://bsvassociation.org/protocol/
-Ferreira Torres, C., Steichen, M., State, R. The Art of The Scam: Demystifying Honeypots in Ethereum Smart Contracts. arXiv:1902.06976. https://ar5iv.labs.arxiv.org/html/1902.06976
-Degen Code. Executor Contract Improvements — Balance Check. Analysis of MEV bait attacks: "bots simulate transactions locally and only broadcast them if they appear valid and profitable." https://www.degencode.com/p/executor-contract-improvements-balance-check
-Flashbots Documentation. Understanding Bundles. "Flashbots bundles let searchers submit multiple transactions together, guaranteed to execute in order in a single block." https://docs.flashbots.net/flashbots-auction/advanced/understanding-bundles
-Blocknative. MEV Bot Guide: Create an Ethereum Arbitrage Trading Bot. "Searchers will run algorithms to detect profitable MEV opportunities and have bots automatically submit any profitable transactions." https://www.blocknative.com/blog/mev-and-creating-a-basic-arbitrage-bot-on-ethereum-mainnet
-EigenPhi analysis of MEV bait attacks. Executor Contract Improvements — Balance Check. https://www.degencode.com/p/executor-contract-improvements-balance-check
-EigenPhi. Anatomy of a Baiting Attack on MEV Arbitrage Bots. Documentation of MEV bait attacks where malicious actors set traps for arbitrage bots.
-Ferreira Torres, C., Steichen, M., State, R. The Art of The Scam: Demystifying Honeypots in Ethereum Smart Contracts. "Academic studies of Ethereum honeypots have found hundreds of such trap contracts with real victims and tens of thousands of dollars in misdirected funds." arXiv:1902.06976.
-Zhang, Y., Li, Z., Yan, T., Liu, Q., Vallarano, N., Tessone, C.J. Profit Maximization In Arbitrage Loops. "Over 300,000 loop transactions occurred within 11 months, with profitable opportunities every block." arXiv:2406.16600v1. https://arxiv.org/html/2406.16600v1
-Shannon, C.E. A Mathematical Theory of Communication. Bell System Technical Journal, 1948. Foundational work establishing that information carries no inherent meaning without interpretation.
-Rememberer Medium. Mining Meaning From Bitcoin Transactions. "Traditional blockchains are 'semantically bankrupt' - they record value but not intent, ownership but not causality." https://rememberer.medium.com/mining-meaning-from-bitcoin-transactions-8c12c21a71c6
-Flashbots Research. MEV Explore Dashboard. Analysis showing bots consume up to 15% of Ethereum's gas capacity in failed arbitrage attempts. https://explore.flashbots.net/
-Daian, P., Goldfeder, S., Kell, T., Li, Y., Zhao, X., Bentov, I., Breidenbach, L., Juels, A. Flash Boys 2.0: Frontrunning in Decentralized Exchanges, Miner Extractable Value, and Consensus Instability. IEEE Symposium on Security and Privacy, 2020.
-Planaria. TXT: Semantic Bitcoin. Protocol for adding semantic metadata layers to Bitcoin transactions. https://txt.network/
-Ethereum Research Forum. Cross-chain Data Availability Using BCH and IPFS. Discussion on using multiple chains for redundancy and censorship resistance. https://ethresear.ch/
-Biermann, T., Schubert, B. Golden Ratio Encryption Method Based on Stream Cipher. Proceedings of the 2nd International Conference on Applied Informatics, 2019.
-CEUR Workshop Proceedings. Semantic Web and Blockchain Workshop. Multiple papers on blockchain semantic enrichment and metadata standards. https://ceur-ws.org/Vol-2599/
-Cryptoeconomic Systems Journal. Transaction Semantics in Distributed Ledgers. MIT Press, 2023. Analysis of semantic layers and their economic implications for blockchain systems.
+1. Smart-Chain. "Traceability via blockchain anchoring." *Blog post*. Available at: https://blog.smart-chain.fr/articles/traceability-via-blockchain-anchoring
+
+2. BSV Association. "BSV Blockchain Protocol | Stability, Scalability and Security." Available at: https://bsvassociation.org/protocol/
+
+3. Ferreira Torres, C., Steichen, M., State, R. "The Art of The Scam: Demystifying Honeypots in Ethereum Smart Contracts." *arXiv:1902.06976*. Available at: https://ar5iv.labs.arxiv.org/html/1902.06976
+
+4. Degen Code. "Executor Contract Improvements — Balance Check." Analysis of MEV bait attacks. Available at: https://www.degencode.com/p/executor-contract-improvements-balance-check
+
+5. Flashbots Documentation. "Understanding Bundles." Available at: https://docs.flashbots.net/flashbots-auction/advanced/understanding-bundles
+
+6. Blocknative. "MEV Bot Guide: Create an Ethereum Arbitrage Trading Bot." Available at: https://www.blocknative.com/blog/mev-and-creating-a-basic-arbitrage-bot-on-ethereum-mainnet
+
+7. EigenPhi. "Anatomy of a Baiting Attack on MEV Arbitrage Bots." Documentation of MEV bait attacks where malicious actors set traps for arbitrage bots.
+
+8. Zhang, Y., Li, Z., Yan, T., Liu, Q., Vallarano, N., Tessone, C.J. "Profit Maximization In Arbitrage Loops." *arXiv:2406.16600v1*. Available at: https://arxiv.org/html/2406.16600v1
+
+9. Shannon, C.E. "A Mathematical Theory of Communication." *Bell System Technical Journal*, 1948. Foundational work establishing that information carries no inherent meaning without interpretation.
+
+10. Rememberer. "Mining Meaning From Bitcoin Transactions." *Medium*. Available at: https://rememberer.medium.com/mining-meaning-from-bitcoin-transactions-8c12c21a71c6
+
+11. Flashbots Research. "MEV Explore Dashboard." Analysis showing bots consume up to 15% of Ethereum's gas capacity in failed arbitrage attempts. Available at: https://explore.flashbots.net/
+
+12. Daian, P., Goldfeder, S., Kell, T., Li, Y., Zhao, X., Bentov, I., Breidenbach, L., Juels, A. "Flash Boys 2.0: Frontrunning in Decentralized Exchanges, Miner Extractable Value, and Consensus Instability." *IEEE Symposium on Security and Privacy*, 2020.
+
+13. Planaria. "TXT: Semantic Bitcoin." Protocol for adding semantic metadata layers to Bitcoin transactions. Available at: https://txt.network/
+
+14. Ethereum Research Forum. "Cross-chain Data Availability Using BCH and IPFS." Discussion on using multiple chains for redundancy and censorship resistance. Available at: https://ethresear.ch/
+
+15. Biermann, T., Schubert, B. "Golden Ratio Encryption Method Based on Stream Cipher." *Proceedings of the 2nd International Conference on Applied Informatics*, 2019.
+
+16. CEUR Workshop Proceedings. "Semantic Web and Blockchain Workshop." Multiple papers on blockchain semantic enrichment and metadata standards. Available at: https://ceur-ws.org/Vol-2599/
+
+17. "Transaction Semantics in Distributed Ledgers." *Cryptoeconomic Systems Journal*, MIT Press, 2023. Analysis of semantic layers and their economic implications for blockchain systems.
+
