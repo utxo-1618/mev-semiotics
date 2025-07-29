@@ -237,12 +237,24 @@ const jamStore = new JAMStore();
 // --- Config and Constants ---
 // All constants are now imported from constants.js at the top of the file
 
-// Initialize a robust, fault-tolerant provider
-const provider = new ethers.providers.FallbackProvider(
-    RPC_URLS.map(url => new ethers.providers.JsonRpcProvider(url.trim())),
-    1 // At least 1 provider must be healthy
-);
-let wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+// Initialize provider with primary RPC
+console.log(`provider_init="starting" rpc="${RPC_URLS[0].trim()}"`);
+const provider = new ethers.providers.JsonRpcProvider(RPC_URLS[0].trim());
+
+// Validate private key and create wallet
+if (!PRIVATE_KEY) {
+    console.error(`wallet_init_err="PRIVATE_KEY not found in environment"`);
+    process.exit(1);
+}
+
+let wallet;
+try {
+    wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+    console.log(`wallet_init="success" address=${wallet.address}`);
+} catch (e) {
+    console.error(`wallet_init_err="${e.message}"`);
+    process.exit(1);
+}
 
 // --- Core Logic (Refactored to use systemState) ---
 
@@ -495,17 +507,37 @@ async function detectAndEmit() {
     }
     
     try {
-        // Ensure nonce accuracy
-        systemState.currentNonce = await provider.getTransactionCount(wallet.address, 'pending');
+        console.log(`nonce_fetch="starting" wallet=${wallet.address}`);
+        // Ensure nonce accuracy with timeout
+        try {
+            systemState.currentNonce = await Promise.race([
+                provider.getTransactionCount(wallet.address, 'pending'),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Nonce fetch timeout')), 10000))
+            ]);
+        } catch (nonceError) {
+            console.error(`nonce_fetch_err="${nonceError.message}"`);
+            // Try without 'pending' parameter
+            try {
+                systemState.currentNonce = await Promise.race([
+                    provider.getTransactionCount(wallet.address),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Nonce fetch timeout (retry)')), 10000))
+                ]);
+                console.log(`nonce_fetch="recovered" method="without_pending"`);
+            } catch (retryError) {
+                console.error(`nonce_fetch_retry_err="${retryError.message}"`);
+                throw retryError;
+            }
+        }
 
         const nonce = systemState.currentNonce;
         console.log(`tx_nonce="using" nonce=${nonce}`);
-
+        
         // Optimistically increment the nonce for the next run.
         systemState.currentNonce++;
         saveSystemState(); 
         console.log(`nonce_update="optimistic_increment" next_nonce=${systemState.currentNonce}`);
 
+        console.log(`jam_generation="starting"`);
         const result = await analyzeAndGenerateJam();
         if (!result) {
             // Rollback nonce if analysis fails
@@ -806,7 +838,7 @@ const runMainLoop = async () => {
     console.log(`recursive_state="initialized" metrics=${JSON.stringify(systemState.metrics).slice(0,50)}...`);
     console.log(`narrative_mode="${narrativeModel}" model="${modelPath}"`);
     
-    // Use BASE_EMISSION_INTERVAL from constants (900000ms = 15 minutes)
+    // Use BASE_EMISSION_INTERVAL from constants (540000ms = 9 minutes)
     // Can be overridden by DETECT_INTERVAL env var if needed
     const INTERVAL = parseInt(process.env.DETECT_INTERVAL, 10) || BASE_EMISSION_INTERVAL;
     console.log(`interval_config="set" seconds=${INTERVAL/1000} phi_aligned="true"`);
