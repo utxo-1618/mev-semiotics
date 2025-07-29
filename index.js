@@ -361,7 +361,7 @@ async function analyzeAndGenerateJam(marketData) {
         hash: null, // Will be set after hashing
         timestamp: Date.now(),
         tx: null,
-        ipfs: "QmNNVfVhm1BoYYFFWCx9pGsidv7zA5YwCdGYYazVnA9fCb",
+        ipfs: "QmdFjeUUZBdmobBLbuMqqouAFQoLmTyfpLGbXyCTttfwE9",
         amplifierTx: null,
         mirrorResponse: null,
         proverb: pattern.steps.map(step => ({
