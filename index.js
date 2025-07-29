@@ -526,6 +526,7 @@ async function detectAndEmit() {
 
         // Get current fee data from Base network
         const feeData = await provider.getFeeData();
+        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.02', 'gwei');
         
         // Ultra-minimal, phi-aligned fees for Base L2.
         const maxPriorityFeePerGas = ethers.utils.parseUnits('0.001618', 'gwei'); // Minimal inclusion bribe
