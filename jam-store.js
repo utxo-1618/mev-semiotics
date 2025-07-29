@@ -4,6 +4,7 @@ const path = require('path');
 const SUCCESSFUL_DIR = path.join(__dirname, 'jams', 'successful');
 const SUCCESSFUL_FILE = path.join(SUCCESSFUL_DIR, 'successful-jams.jsonl');
 
+const JAM_INTERACTIONS_FILE = path.join(__dirname, 'jams', 'interactions.jsonl');
 class JAMStore {
     constructor() {
         this.storePath = path.join(__dirname, 'jams');
@@ -91,6 +92,39 @@ class JAMStore {
     getSuccessfulJAMsByIntent(intentClass) {
         const allJAMs = this.getSuccessfulJAMs();
         return allJAMs.filter(jam => jam.intent_class === intentClass);
+    }
+
+    // --- Reflexive Brain Functions ---
+
+    recordInteraction(jamHash, botAddress, profit) {
+        try {
+            const interaction = {
+                timestamp: Date.now(),
+                jamHash,
+                botAddress,
+                profit
+            };
+            fs.appendFileSync(JAM_INTERACTIONS_FILE, JSON.stringify(interaction) + '\n');
+            console.log(`interaction_recorded jam=${jamHash.slice(0,10)} bot=${botAddress} profit=${profit}`);
+        } catch (e) {
+            console.warn('Could not record JAM interaction:', e.message);
+        }
+    }
+
+    getInteractionHistory(jamHash = null) {
+        try {
+            if (!fs.existsSync(JAM_INTERACTIONS_FILE)) return [];
+            const lines = fs.readFileSync(JAM_INTERACTIONS_FILE, 'utf8').split('\n').filter(line => line.trim());
+            const interactions = lines.map(line => JSON.parse(line));
+
+            if (jamHash) {
+                return interactions.filter(i => i.jamHash === jamHash);
+            }
+            return interactions;
+        } catch (e) {
+            console.warn('Could not read JAM interaction history:', e.message);
+            return [];
+        }
     }
 }
 
