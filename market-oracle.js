@@ -1,7 +1,41 @@
 
 const { ethers } = require("ethers");
-const { PROVERB_PATTERNS } = require('./constants');
-const dexConfig = require('./dex-config');
+const { PROVERB_PATTERNS, RPC_URLS, PHI } = require('./constants');
+const { DEX_CONFIGS, TOKENS } = require('./dex-config');
+
+// Resilient RPC with failover
+let currentRpcIndex = 0;
+
+async function resilientRpcCall(method, params = [], maxRetries = RPC_URLS.length) {
+    let lastError;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const rpcUrl = RPC_URLS[currentRpcIndex];
+            const tempProvider = new ethers.providers.JsonRpcProvider(rpcUrl);
+            
+            // Set a phi-aligned timeout (30 seconds)
+            const timeout = Math.floor(PHI * 20 * 1000); // ~32 seconds
+            
+            const result = await Promise.race([
+                tempProvider.send(method, params),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Oracle RPC timeout')), timeout)
+                )
+            ]);
+            
+            return { provider: tempProvider, result };
+        } catch (error) {
+            lastError = error;
+            console.warn(`oracle_rpc_attempt="failed" url="${RPC_URLS[currentRpcIndex]}" attempt=${attempt + 1}`);
+            
+            // Rotate to next RPC URL
+            currentRpcIndex = (currentRpcIndex + 1) % RPC_URLS.length;
+        }
+    }
+    
+    throw new Error(`Oracle RPC failed: ${lastError.message}`);
+}
 
 // --- ABIs ---
 const pairABI = [
@@ -24,15 +58,15 @@ const CACHE_TTL = 30 * 1000; // 30 seconds for live market data
  * @returns {Promise<object|null>} Reserves data or null on failure.
  */
 async function getPairReserves(fromTokenSymbol, toTokenSymbol, dex, provider) {
-    const fromAddress = dexConfig.getTokenAddress(fromTokenSymbol);
-    const toAddress = dexConfig.getTokenAddress(toTokenSymbol);
+    const fromAddress = TOKENS[fromTokenSymbol];
+    const toAddress = TOKENS[toTokenSymbol];
     if (!fromAddress || !toAddress) return null;
 
     const cacheKey = `reserves:${dex.NAME}:${fromTokenSymbol}:${toTokenSymbol}`;
     if (cache.has(cacheKey)) return cache.get(cacheKey);
 
     try {
-        const factory = new ethers.Contract(dex.FACTORY, ['function getPair(address, address) external view returns (address)'], provider);
+        const factory = new ethers.Contract(dex.factory || dex.FACTORY, ['function getPair(address, address) external view returns (address)'], provider);
         const pairAddress = await factory.getPair(fromAddress, toAddress);
 
         if (pairAddress === ethers.constants.AddressZero) return null;
@@ -55,7 +89,7 @@ async function getPairReserves(fromTokenSymbol, toTokenSymbol, dex, provider) {
 /**
  * Fetches and aggregates market data across the entire DEX cascade.
  * This is the main sensory input for the Tactical Brain.
- * @param {ethers.Provider} provider - The JSON RPC provider.
+ * @param {ethers.Provider} provider - The JSON RPC provider (optional, uses resilient RPC internally).
  * @returns {Promise<object>} A snapshot of current market conditions.
  */
 async function getMarketData(provider) {
@@ -67,11 +101,36 @@ async function getMarketData(provider) {
     console.log('oracle_fetch="start" msg="recalculating live market state"');
 
     try {
-        const feeData = await provider.getFeeData();
+        // Use resilient RPC for fee data with recursive phi-aligned fallbacks
+        let gasPrice = 1; // Default fallback
+        try {
+            const { provider: resilientProvider, result: feeData } = await resilientRpcCall('eth_feeHistory', [1, 'latest', []]);
+            if (feeData && feeData.baseFeePerGas && feeData.baseFeePerGas[0]) {
+                gasPrice = parseFloat(ethers.utils.formatUnits(feeData.baseFeePerGas[0], 'gwei'));
+            } else {
+                // Fallback to direct provider call if fee history format is unexpected
+                const directFeeData = await resilientProvider.getFeeData();
+                gasPrice = parseFloat(ethers.utils.formatUnits(directFeeData.gasPrice || '1', 'gwei'));
+            }
+            // Update provider reference for subsequent calls
+            provider = resilientProvider;
+        } catch (feeError) {
+            console.warn(`oracle_fee_fallback="activated" msg="${feeError.message}"`);
+            // Use original provider as final fallback
+            if (provider) {
+                try {
+                    const fallbackFeeData = await provider.getFeeData();
+                    gasPrice = parseFloat(ethers.utils.formatUnits(fallbackFeeData.gasPrice || '1', 'gwei'));
+                } catch (finalError) {
+                    console.warn(`oracle_fee_final_fallback="using_default" msg="${finalError.message}"`);
+                }
+            }
+        }
+
         const marketData = {
             volatility: {},
             liquidity: {},
-            gasPrice: parseFloat(ethers.utils.formatUnits(feeData.gasPrice || '1', 'gwei')),
+            gasPrice,
         };
 
         const analysisPromises = Object.keys(PROVERB_PATTERNS).map(async (patternName) => {
@@ -82,7 +141,10 @@ async function getMarketData(provider) {
             let weakestLiquidity = Infinity;
             let highestVolatility = 0;
 
-            for (const dex of dexConfig.DEX_CASCADE) {
+            // Use all available DEXs for market scanning
+            const dexCascade = Object.values(DEX_CONFIGS);
+            
+            for (const dex of dexCascade) {
                 const reserves = await getPairReserves(from, to, dex, provider);
                 if (reserves) {
                     // --- Liquidity as a measure of pool depth (smaller reserve is weaker) ---
