@@ -1,6 +1,6 @@
 // index.js - The Strategist: A Causal Engine (Stateless & Resilient)
 // Usage: node index.js
-// MERGED: jam-store.js and sync-latest-jam.js
+// MERGED: jam-store.js
 
 const { ethers } = require("ethers");
 
