@@ -58,6 +58,7 @@ const {
 } = require('./constants');
 const lunarClock = require('./tools/lunar-clock');
 
+const { getMarketData } = require('./market-oracle');
 // Initialize cosmic signature if wallet is available
 if (process.env.WALLET_ADDRESS && process.env.BIRTH_TIMESTAMP) {
     lunarClock.setPersonalSignature(
@@ -338,7 +339,7 @@ async function analyzeAndGenerateJam() {
     const gasPriceGwei = parseFloat(ethers.utils.formatUnits(gasPrice, 'gwei'));
     
     // Select pattern based on current conditions and past performance
-    const selectedPattern = selectOptimalPattern(gasPriceGwei, systemState.metrics.patternSuccess);
+    const selectedPattern = selectOptimalPattern(systemState.metrics.patternSuccess, marketData);
     const pattern = PROVERB_PATTERNS[selectedPattern];
     
     // Generate recursive metadata
@@ -360,7 +361,7 @@ async function analyzeAndGenerateJam() {
         hash: null, // Will be set after hashing
         timestamp: Date.now(),
         tx: null,
-        ipfs: "QmNUzWDZboZoZUPjnGYTXA94Pmeqjxuy42xHovtigQ1rL5",
+        ipfs: "QmNNVfVhm1BoYYFFWCx9pGsidv7zA5YwCdGYYazVnA9fCb",
         amplifierTx: null,
         mirrorResponse: null,
         proverb: pattern.steps.map(step => ({
@@ -447,27 +448,42 @@ async function analyzeAndGenerateJam() {
     return { jam, hash };
 }
 
-// Helper function to select optimal pattern
-function selectOptimalPattern(gasPriceGwei, patternMetrics) {
+// Helper function to select optimal pattern with multi-layered intelligence
+function selectOptimalPattern(patternMetrics, marketData) {
     const patterns = Object.keys(PROVERB_PATTERNS);
-    
-    // Calculate pattern scores based on past performance and current conditions
-    const scores = patterns.map(pattern => {
-        const metrics = patternMetrics[pattern];
-        const successRate = metrics.attempts > 0 ? 
-            metrics.successes / metrics.attempts : 0.5;
-        const recency = (Date.now() - metrics.lastUsed) / (1000 * 60); // Minutes since last use
-        const cooldownPenalty = recency < 5 ? COOLDOWN_PENALTY : 0;
+    marketData = marketData || { volatility: {}, liquidity: {}, gasPrice: 1 }; // Default if oracle fails
+
+    const scores = patterns.map(patternName => {
+        const pattern = PROVERB_PATTERNS[patternName];
+        const metrics = patternMetrics[patternName] || { attempts: 0, successes: 0, lastUsed: 0 };
+        const pair = `${pattern.steps[0].from}/${pattern.steps[0].to}`;
+
+        // --- Layer 1: Tactical Brain ---
+        const volatilityScore = marketData.volatility[pair] || 0;
+        const liquidityScore = marketData.liquidity[pair] > 0 ? (1 / Math.log(marketData.liquidity[pair])) : 0;
+        const gasAdaptationScore = 1 / (marketData.gasPrice + 1); // Favour action in low-gas environments
+
+        // --- Layer 2: Reflexive Brain (Learning) ---
+        const successRate = metrics.attempts > 0 ? metrics.successes / metrics.attempts : 0.5; // Start with a neutral bias
+        const recency = (Date.now() - metrics.lastUsed) / (1000 * 60); // in minutes
+        const cooldownPenalty = Math.max(0, 1 - (recency / 10)); // Penalty if used in last 10 mins
         const explorationBonus = metrics.attempts < 10 ? EXPLORATION_BONUS : 0;
         
-        // Base score on success rate with exploration and cooldown factors
-        const score = successRate + explorationBonus - cooldownPenalty;
-        
-        return { pattern, score };
+        // --- Final Score Calculation (Weighted) ---
+        const weightedScore = 
+            (0.4 * successRate) +         // Past performance is most important
+            (0.3 * volatilityScore) +     // Volatility is a strong signal of opportunity
+            (0.1 * liquidityScore) +      // Lower liquidity can be easier to move
+            (0.1 * gasAdaptationScore) +  // Adapt to gas regimes
+            (0.1 * explorationBonus) -    // Encourage trying new things
+            cooldownPenalty;              // Avoid spamming the same pattern
+
+        console.log(`pattern_score name=${patternName} score=${weightedScore.toFixed(3)} (success=${successRate.toFixed(2)}, vol=${volatilityScore.toFixed(2)}, liq=${liquidityScore.toFixed(2)})`);
+        return { pattern: patternName, score: weightedScore };
     });
     
-    // Sort by score and select the best
     scores.sort((a, b) => b.score - a.score);
+    console.log(`selected_pattern name=${scores[0].pattern} score=${scores[0].score.toFixed(3)}`);
     return scores[0].pattern;
 }
 
@@ -499,6 +515,8 @@ async function checkSufficientBalance() {
 async function detectAndEmit() {
     console.log(`detect_and_emit:start pid=${process.pid}`);
     
+    const marketData = await getMarketData(provider);
+
     // Check cosmic timing window before proceeding
     const cosmicWindow = lunarClock.getEmissionWindow();
     
@@ -625,6 +643,15 @@ async function detectAndEmit() {
         const selectedPattern = jam.meta.pattern_type;
         if (systemState.metrics.patternSuccess[selectedPattern]) {
              systemState.metrics.patternSuccess[selectedPattern].successes++;
+        }
+        
+        // Update latest-jam.json file for gist updater
+        try {
+            const latestJamPath = path.join(__dirname, 'latest-jam.json');
+            fs.writeFileSync(latestJamPath, JSON.stringify(jam, null, 2));
+            console.log(`latest_jam_updated="success" hash=${hash.slice(0, 10)}`);
+        } catch (jamFileErr) {
+            console.error(`latest_jam_update_err="${jamFileErr.message}"`);
         }
         // ---- END STATE UPDATE ----
 
