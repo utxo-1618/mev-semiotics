@@ -71,7 +71,8 @@ app.get('/', (req, res) => {
             divine: '/feed/divine',
             moon: '/feed/moon',
             all: '/feed/all',
-            stats: '/stats'
+            stats: '/stats',
+            'latest-jam': '/latest-jam.json'
         }
     });
 });
@@ -150,6 +151,33 @@ app.get('/stats', (req, res) => {
         intent_distribution: intentCounts,
         tag_distribution: tagCounts
     });
+});
+
+// Latest JAM file - instant, no caching (perfect for MEV)
+app.get('/latest-jam.json', (req, res) => {
+    const jamFilePath = path.join(__dirname, 'latest-jam.json');
+    
+    // Set headers to prevent caching
+    res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Content-Type': 'application/json'
+    });
+    
+    try {
+        if (!fs.existsSync(jamFilePath)) {
+            return res.status(404).json({ error: 'Latest JAM not found' });
+        }
+        
+        const jamContent = fs.readFileSync(jamFilePath, 'utf8');
+        const jamData = JSON.parse(jamContent);
+        
+        res.json(jamData);
+    } catch (error) {
+        console.error(`latest_jam_serve_err="${error.message}"`);
+        res.status(500).json({ error: 'Failed to read latest JAM' });
+    }
 });
 
 // Single JAM by signalHash
