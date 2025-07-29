@@ -8,17 +8,22 @@ require('dotenv').config();
 // --- Configuration ---
 const GIST_ID = process.env.GIST_ID;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const DEBOUNCE_DELAY = 120000; // 2 minutes
-const MAX_RETRIES = 2; // Reduce retries
-const RETRY_DELAY = 30000; // 30 seconds
-const MIN_UPDATE_INTERVAL = 600000; // 10 minutes - robust protection against rate-limiting
+const DEBOUNCE_DELAY = 0; // Instant updates for MEV
+const MAX_RETRIES = 3; // Increased for better reliability
+const RETRY_DELAY = 5000; // 5 seconds
+const MIN_UPDATE_INTERVAL = 1000; // 1 second minimum between updates
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB max file size
 
 // --- Validation ---
 if (!GIST_ID || !GITHUB_TOKEN) {
     console.error('env_error=missing_vars vars="GIST_ID,GITHUB_TOKEN"');
     process.exit(1);
 }
-const authHeader = `token ${GITHUB_TOKEN}`;
+
+// Use Bearer token format (modern GitHub API)
+const authHeader = GITHUB_TOKEN.startsWith('github_pat_') || GITHUB_TOKEN.startsWith('ghp_') 
+    ? `Bearer ${GITHUB_TOKEN}` 
+    : `token ${GITHUB_TOKEN}`;
 
 // --- State ---
 let isUpdating = false;
@@ -61,16 +66,36 @@ async function updateGist() {
             return;
         }
         
-        // 2. Read file content
+        // 2. Check file size
+        const stats = await fs.promises.stat(jamFilePath);
+        if (stats.size > MAX_FILE_SIZE) {
+            log('warn', `jam_update=skip reason="file_too_large" size=${stats.size}`);
+            return;
+        }
+        
+        // 3. Read file content
         const jamContent = await fs.promises.readFile(jamFilePath, 'utf8');
         if (!jamContent.trim()) {
             log('info', 'jam_update=skip reason="file_empty"');
             return;
         }
 
-        // 3. Validate JSON
+        // 4. Validate JSON structure
+        let jamData;
         try {
-            JSON.parse(jamContent);
+            jamData = JSON.parse(jamContent);
+            
+            // Basic JAM validation - ensure it has core semantic mining fields
+            if (!jamData.hash || !jamData.timestamp || !jamData.proverb) {
+                log('warn', 'jam_update=skip reason="invalid_jam_structure"');
+                return;
+            }
+            
+            // Validate JAM semantic integrity
+            if (jamData.proverb && Array.isArray(jamData.proverb) && jamData.proverb.length === 0) {
+                log('info', 'jam_update=skip reason="empty_proverb_array"');
+                return;
+            }
         } catch (err) {
             log('info', 'jam_update=skip reason="invalid_json"');
             return;
@@ -162,9 +187,9 @@ function main() {
                 return;
             }
             
-            log('info', 'jam_change=detected state=debouncing');
+            log('info', 'jam_change=detected state=instant_update');
             debounceTimeout = setTimeout(() => {
-                log('info', 'debounce=complete action=update');
+                log('info', 'update=triggered action=instant');
                 updateGist();
             }, DEBOUNCE_DELAY);
         }
