@@ -479,7 +479,7 @@ async function pinToIPFS(jam, baseResult) {
     try {
         // Add IPFS hash placeholder to JAM if not present
         if (!jam.ipfs) {
-            jam.ipfs = 'QmNUzWDZboZoZUPjnGYTXA94Pmeqjxuy42xHovtigQ1rL5';
+            jam.ipfs = 'QmdFjeUUZBdmobBLbuMqqouAFQoLmTyfpLGbXyCTttfwE9';
         }
         const fetch = (await import('node-fetch')).default;
         const FormData = (await import('form-data')).default;
