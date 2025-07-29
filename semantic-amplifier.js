@@ -1311,7 +1311,7 @@ console.log(`profit_ratio="${actualProfitRatio.toFixed(2)}:1"`);
         cost: actualCostEth || 0,
         efficiency: actualCostEth < 0.00002 ? "optimal" : "acceptable",
         timestamp: Math.floor(Date.now() / 1000),
-        ipfs: 'QmNNVfVhm1BoYYFFWCx9pGsidv7zA5YwCdGYYazVnA9fCb',
+        ipfs: 'QmdFjeUUZBdmobBLbuMqqouAFQoLmTyfpLGbXyCTttfwE9',
         profit: (amplificationValue || 0) - (actualCostEth || 0),
         cascadeDepth: recursiveDepth || 1,
         consensusMultiplier: getConsensusMultiplier() || 1,
