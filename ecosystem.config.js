@@ -53,8 +53,8 @@ module.exports = {
         DECOMPILER_API_URL: process.env.DECOMPILER_API_URL || 'https://api.evmdecompiler.com/decompile',
         DECOMPILER_API_KEY: process.env.DECOMPILER_API_KEY || '',
         // --- System Config ---
-        DETECT_INTERVAL: process.env.DETECT_INTERVAL || 900000, // 15 minutes for PHI-aligned recursion
-        MAX_GAS_GWEI: process.env.MAX_GAS_GWEI || 0.02,
+        DETECT_INTERVAL: process.env.DETECT_INTERVAL || 540000, // 9 minutes for PHI-aligned recursion
+        MAX_GAS_GWEI: process.env.MAX_GAS_GWEI || 0.01618,
         // --- Cross-Chain Config ---
         ENABLE_BSV_ECHO: process.env.ENABLE_BSV_ECHO || 'true',
         BSV_PRIVATE_KEY: process.env.BSV_PRIVATE_KEY,
@@ -62,8 +62,8 @@ module.exports = {
         NARRATIVE_MODEL: process.env.NARRATIVE_MODEL || 'default',
         ENABLE_MOTS: process.env.ENABLE_MOTS || 'true',
         // --- Cosmic Timing Config ---
-        BIRTH_TIMESTAMP: process.env.BIRTH_TIMESTAMP || '', // Optional: Unix timestamp for natal chart
-        WALLET_ADDRESS: process.env.WALLET_ADDRESS, // Used for personal cosmic signature
+        // BIRTH_TIMESTAMP: process.env.BIRTH_TIMESTAMP || '', // Optional: Unix timestamp for natal chart
+        // WALLET_ADDRESS: process.env.WALLET_ADDRESS, // Used for personal cosmic signature
       }
     },
     {
@@ -112,7 +112,7 @@ module.exports = {
       script: './monitor.js',
       cwd: __dirname,
       autorestart: true,
-      watch: ['./latest-jam.json', './substrate-cache.json'],
+      watch: ['./latest-jam.json'],
       max_restarts: 10,
       min_uptime: '60s',
       error_file: './logs/cache/mon.log',
