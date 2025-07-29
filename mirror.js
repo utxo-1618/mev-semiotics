@@ -5,20 +5,8 @@ const { ethers } = require('ethers');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
-let jamStore;
-try {
-    jamStore = require('./jam-store');
-} catch (e) {
-    console.log('module_load="warn" module="jam-store" action="using_mock"');
-    jamStore = {
-        retrieve: (hash) => ({
-            proverb: [],
-            meta: {},
-            tags: []
-        }),
-        update: () => {}
-    };
-}
+// Aligned: This now uses the unified, file-based jam-store.
+const jamStore = require('./jam-store');
 
 // Import DEX configurations for recursive alignment with amplifier
 let DEX_CONFIGS, TOKENS, selectOptimalDEX;
@@ -435,10 +423,16 @@ async function processSignalEvent(hash, event) {
             const swapPath = [tokenFrom, tokenTo];
             const deadline = Math.floor(Date.now() / 1000) + 300;
             
-            const tx = await vault.emitSignal(hash, { gasLimit: 200000 });
-            await tx.wait();
+            const swapTx = await router.swapExactTokensForTokens(
+                fromBalance, // amountIn
+                0, // amountOutMinimum (set to 0 for simplicity, consider slippage for production)
+                swapPath,
+                mirrorWallet.address, // recipient
+                deadline
+            );
+            await swapTx.wait();
             
-            console.log(`swap_status="success" tx="${tx.hash}"`);
+            console.log(`swap_status=\"success\" tx=\"${swapTx.hash}\"`);
             totalMirrored++;
         } else if (myStep.action === 'DEPOSIT') {
             console.log(`deposit_exec="start" action="${myStep.action}" token="${myStep.from}"`);
