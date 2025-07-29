@@ -60,24 +60,91 @@ function getEventHash(event) {
         .slice(0, 16);
 }
 
-// Trigger narrative retraining
+// Trigger narrative retraining with enhanced error handling
 async function triggerNarrativeTraining(narrative, startBlock, endBlock) {
     console.log(`narrative_train="trigger" target="${narrative}" blocks="${startBlock}-${endBlock}"`);
     
     return new Promise((resolve, reject) => {
-        exec(`node ${path.join(__dirname, 'tools/narrative-trainer.js')} ${narrative} ${startBlock} ${endBlock}`, 
-            (err, stdout, stderr) => {
-                if (err) {
-                    const sponge = err.message && err.message.length > 400 ? err.message.slice(0, 400) + '...(truncated)' : err.message;
-                    let trimmedStderr = typeof stderr === 'string' && stderr.length > 500 ? stderr.slice(0, 500) + '...(truncated)' : stderr;
-                    console.error(`train_err="${sponge}" stderr="${trimmedStderr}"`);
-                    reject(new Error(`Training failed for ${narrative} with blocks ${startBlock}-${endBlock}`));
-                } else {
-                    console.log(stdout);
-                    resolve();
+        const trainCommand = `node ${path.join(__dirname, 'tools/narrative-trainer.js')} ${narrative} ${startBlock} ${endBlock}`;
+        
+        const child = exec(trainCommand, {
+            timeout: 360000, // 6 minute timeout (longer than trainer's 5 min)
+            killSignal: 'SIGTERM',
+            maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+        }, (err, stdout, stderr) => {
+            if (err) {
+                // Enhanced error categorization
+                const errorMessage = err.message || err.toString();
+                const isTimeout = err.killed || err.signal === 'SIGTERM' || /timeout/i.test(errorMessage);
+                const isNetworkError = /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|fetch/i.test(errorMessage);
+                const isPermissionError = /EACCES|EPERM/i.test(errorMessage);
+                const isPythonError = /python|scrapy|module/i.test(errorMessage);
+                
+                // Truncate messages for cleaner logs
+                const truncatedError = errorMessage.length > 300 ? 
+                    errorMessage.slice(0, 300) + '...(truncated)' : errorMessage;
+                const truncatedStderr = stderr && stderr.length > 400 ? 
+                    stderr.slice(0, 400) + '...(truncated)' : stderr;
+                
+                // Log error with category
+                let errorCategory = 'general';
+                if (isTimeout) errorCategory = 'timeout';
+                else if (isNetworkError) errorCategory = 'network';
+                else if (isPermissionError) errorCategory = 'permission';
+                else if (isPythonError) errorCategory = 'python_env';
+                
+                console.error(`train_err="${truncatedError}" category="${errorCategory}" narrative="${narrative}"`);
+                
+                if (truncatedStderr && truncatedStderr.trim()) {
+                    console.error(`train_stderr="${truncatedStderr}"`);
                 }
+                
+                // Provide specific guidance based on error type
+                if (isTimeout) {
+                    console.warn(`timeout_guidance="Training exceeded time limit. Consider reducing block range (currently ${endBlock - startBlock} blocks) or check system resources."`);
+                } else if (isNetworkError) {
+                    console.warn(`network_guidance="Network connectivity issue during training. The system will retry with fallback model."`);
+                } else if (isPermissionError) {
+                    console.warn(`permission_guidance="File system permission error. Check write access to models directory."`);
+                } else if (isPythonError) {
+                    console.warn(`python_guidance="Python environment issue. Check MoTS virtual environment setup."`);
+                }
+                
+                reject(new Error(`Training failed for ${narrative} with blocks ${startBlock}-${endBlock} (${errorCategory})`));
+            } else {
+                // Filter and clean stdout for better log readability
+                if (stdout && stdout.trim()) {
+                    const cleanOutput = stdout
+                        .split('\n')
+                        .filter(line => {
+                            // Keep important status messages, filter noise
+                            return line.includes('train_status') || 
+                                   line.includes('narrative_train') ||
+                                   line.includes('next_step') ||
+                                   line.includes('model_size') ||
+                                   (!line.includes('scrapy') && !line.includes('Overridden') && line.trim().length > 0);
+                        })
+                        .join('\n')
+                        .trim();
+                    
+                    if (cleanOutput) {
+                        console.log(`train_output="${cleanOutput}"`);
+                    }
+                }
+                
+                console.log(`train_success="completed" narrative="${narrative}" blocks="${startBlock}-${endBlock}"`);
+                resolve();
             }
-        );
+        });
+        
+        // Handle process errors
+        child.on('error', (error) => {
+            console.error(`train_process_err="${error.message}" narrative="${narrative}"`);
+            reject(error);
+        });
+        
+        // Log training start
+        console.log(`train_exec="started" narrative="${narrative}" timeout="6min" pid=${child.pid}`);
     });
 }
 
