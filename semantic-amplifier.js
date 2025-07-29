@@ -622,6 +622,8 @@ async function handleSignal(hash, event) {
       // Create token pair identifier for PHI-specific scaling
       const tokenPairId = `${myStep.from}-${myStep.to}`;
       const amountIn = calculateTradeAmount(adjustedConfidence, gasPrice, 0, tokenPairId);
+      
+      // Get market-aware DEX cascade based on JAM's recursive state
       DEX_CASCADE = getRecursiveDEXCascade(jamData);
       console.log(`dex_cascade="selected" cascade="${DEX_CASCADE.map(d => d.NAME).join(' -> ')}"`);
       console.log(`consensus_window="${isConsensusTime() ? 'active' : 'inactive'}"`);
@@ -1309,7 +1311,7 @@ console.log(`profit_ratio="${actualProfitRatio.toFixed(2)}:1"`);
         cost: actualCostEth || 0,
         efficiency: actualCostEth < 0.00002 ? "optimal" : "acceptable",
         timestamp: Math.floor(Date.now() / 1000),
-        ipfs: 'QmNUzWDZboZoZUPjnGYTXA94Pmeqjxuy42xHovtigQ1rL5',
+        ipfs: 'QmNNVfVhm1BoYYFFWCx9pGsidv7zA5YwCdGYYazVnA9fCb',
         profit: (amplificationValue || 0) - (actualCostEth || 0),
         cascadeDepth: recursiveDepth || 1,
         consensusMultiplier: getConsensusMultiplier() || 1,
