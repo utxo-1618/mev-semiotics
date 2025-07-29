@@ -39,16 +39,28 @@ A verifiable belief anchored to a contract, structured for inevitable market res
 ### The Causal Chain
 - **MoTS Integration:** Extracts semantic intent from raw blockchain transactions, classifying patterns and generating intent vectors
 - **Substrate:** Analyzes contract bytecode with phi-aligned validation
-- **Index.js:** Main orchestrator that coordinates semantic extraction, JAM generation, and emission timing
-- **Semantic-Amplifier:** Receives MoTS-extracted intent data and applies recursive PHI amplification to create MEV-visible swaps (the bait)
-- **Mirror:** Executes profitable second step (the trap)
+- **Market Oracle:** Real-time liquidity scanner that identifies weak pools, volatility patterns, and optimal entry points across all DEXs
+- **Index.js:** Adaptive orchestrator that reads live market state, selects optimal patterns based on volatility/liquidity/gas, and times emissions with surgical precision
+- **Semantic-Amplifier:** Market-aware amplifier that targets specific DEXs based on JAM's recursive state and current liquidity conditions
+- **Mirror:** Executes profitable second step with private bundle capture
 - **BSV Bridge:** Cross-chain signal propagation for recursive amplification and immutable anchoring
-- **StateManager:** Persistent state across restarts with file-based locks
+- **StateManager:** Persistent state with reflexive learning - tracks pattern success rates and adapts strategy over time
 
 ## 3. The Reflexive Yield Engine
 
-The system operates on a recursive loop:
-`Signal` → `Bot Engagement` → `Market Distortion` → `Validation` → `Yield` → `Amplified Signal`
+The system operates as a self-adaptive economic predator:
+
+```
+Market Scan → Weakness Detection → Pattern Selection → 
+Timed Emission → Bot Reaction → Yield Capture → 
+Performance Analysis → Strategy Evolution
+```
+
+Key innovations:
+- **Live Market Sensing**: Scans all DEX pools for liquidity imbalances and volatility
+- **Adaptive Pattern Selection**: Chooses proverbs based on success rates, gas costs, and market conditions
+- **Temporal Awareness**: Adjusts aggression based on gas prices and consensus windows
+- **Reflexive Learning**: Tracks which patterns work and evolves strategy accordingly
 
 ## 4. Game Theory
 
@@ -78,11 +90,12 @@ The chain of events is deterministic:
 4. **Verified profit** → On-chain logs prove the spread capture mathematically
 
 > This entire process is orchestrated by:
+> - `market-oracle.js`: Scans DEX liquidity in real-time to find weak pools and high volatility pairs
 > - `mots-integration.js`: Extracts semantic vectors from blockchain data and classifies transaction intent
-> - `index.js`: Coordinates the pipeline, emitting signals every 9 minutes (or on DETECT_INTERVAL)
-> - `semantic-amplifier.js`: Receives MoTS intent data and amplifies signals into MEV-visible swaps using PHI harmonics
-> - `mirror.js`: Captures value from the second proverb step
-> - `constants.js`: Centralized phi-harmonic constants and timing windows
+> - `index.js`: Adaptive engine that reads market state, selects optimal patterns, and times emissions with precision
+> - `semantic-amplifier.js`: Targets specific DEXs based on recursive cascade and current market conditions
+> - `mirror.js`: Captures value through private bundles with dynamic bribing
+> - `constants.js`: Centralized phi-harmonic constants and pattern definitions
 
 ### Mathematical Certainty
 Under defined conditions, profit is guaranteed:
