@@ -487,20 +487,28 @@ function selectOptimalPattern(patternMetrics, marketData) {
     return scores[0].pattern;
 }
 
-// Pre-check balance before attempting emission
+// Pre-check balance before attempting emission with phi-aligned parameters
 async function checkSufficientBalance() {
     try {
         const balance = await provider.getBalance(wallet.address);
         const feeData = await provider.getFeeData();
-        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.02', 'gwei');
-        const estimatedCost = baseFee.mul(250000); // gasLimit * baseFee
-        const minimumRequired = estimatedCost.mul(3); // 3x safety margin
+        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.001', 'gwei');
+        
+        // Use phi-aligned gas estimation
+        const phiGasLimit = 150000; // Reduced limit matching emission function
+        const phiScaledBaseFee = baseFee.mul(618).div(1000); // baseFee * φ^-1
+        const priorityFee = ethers.utils.parseUnits('0.000618', 'gwei');
+        const totalFeePerGas = phiScaledBaseFee.add(priorityFee);
+        
+        const estimatedCost = totalFeePerGas.mul(phiGasLimit);
+        const phiMargin = Math.floor(2.618 * 100) / 100; // φ² safety margin
+        const minimumRequired = estimatedCost.mul(Math.floor(phiMargin * 100)).div(100);
         
         const balanceEth = ethers.utils.formatEther(balance);
         const requiredEth = ethers.utils.formatEther(minimumRequired);
         
         if (balance.lt(minimumRequired)) {
-            console.warn(`balance_precheck="insufficient" current="${balanceEth}" required="${requiredEth}" margin="3x"`);
+            console.warn(`balance_precheck="insufficient" current="${balanceEth}" required="${requiredEth}" margin="φ²"`);
             return false;
         }
         
@@ -571,18 +579,34 @@ async function detectAndEmit() {
             "function registerSignal(string calldata description, uint256 categoryId) external returns (bytes32)"
         ], wallet);
 
-        // Set fixed gas limit for Base network
-        const gasLimit = ethers.BigNumber.from('250000');
-
-        // Get current fee data from Base network
+        // Get cosmic resonance for fee calculation
+        const cosmicResonance = lunarClock.calculateCosmicResonance(new Date());
+        
+        // Phi-aligned gas optimization for Base L2
         const feeData = await provider.getFeeData();
-        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.02', 'gwei');
+        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.001', 'gwei');
         
-        // Ultra-minimal, phi-aligned fees for Base L2.
-        const maxPriorityFeePerGas = ethers.utils.parseUnits('0.001618', 'gwei'); // Minimal inclusion bribe
-        const maxFeePerGas = baseFee.mul(110).div(100).add(maxPriorityFeePerGas); // 1.1x base fee + priority
+        // Dynamic gas limit based on JAM complexity and cosmic resonance
+        const baseGasLimit = 150000; // Reduced base limit for simple registerSignal
+        const complexityMultiplier = jam.cascadeDepth > 1 ? 1.1 : 1.0;
+        const resonanceMultiplier = cosmicResonance.total > 1.5 ? 0.95 : 1.0; // Lower gas during high resonance
+        const phiAdjustedGasLimit = Math.floor(baseGasLimit * complexityMultiplier * resonanceMultiplier);
+        const gasLimit = ethers.BigNumber.from(phiAdjustedGasLimit.toString());
         
-        console.log(`gas_fees_optimized: maxFeePerGas=${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei, maxPriorityFeePerGas=${ethers.utils.formatUnits(maxPriorityFeePerGas, 'gwei')} gwei`);
+        // Phi-aligned priority fee calculation
+        const baselinePriority = ethers.utils.parseUnits('0.000618', 'gwei'); // φ^-1 * 0.001
+        const cosmicBoost = cosmicResonance.total > 1.618 ? 
+            ethers.utils.parseUnits((0.001618 * cosmicResonance.total).toFixed(6), 'gwei') : 
+            baselinePriority;
+        const maxPriorityFeePerGas = ethers.BigNumber.from(
+            Math.min(cosmicBoost.toNumber(), ethers.utils.parseUnits('0.002', 'gwei').toNumber())
+        );
+        
+        // Golden ratio fee scaling: base fee * φ^-1 + priority
+        const phiScaledBaseFee = baseFee.mul(618).div(1000); // baseFee * φ^-1
+        const maxFeePerGas = phiScaledBaseFee.add(maxPriorityFeePerGas); 
+        
+        console.log(`gas_fees_optimized: gasLimit=${gasLimit} maxFeePerGas=${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei, maxPriorityFeePerGas=${ethers.utils.formatUnits(maxPriorityFeePerGas, 'gwei')} gwei, phi_scaled=true, cosmic_resonance=${cosmicResonance.total.toFixed(3)}`);
 
         // Check balance before attempting transaction submission
         if (!(await checkSufficientBalance())) {
