@@ -1,4 +1,4 @@
-# UTXO-Mining: Semantic Autonomous Miner
+# Semantic Autonomous Miner
 
 > Recursive compiler for deterministic MEV reflexives.
 
