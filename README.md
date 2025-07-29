@@ -1,4 +1,4 @@
-## 0. Abstract
+# Abstract
 
 This document provides source-anchored verification of the repository. Each functional claim is mapped to explicit code regions with causal analysis of signal propagation through the system.
 
