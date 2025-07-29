@@ -288,7 +288,7 @@ async function releaseLock() {
 }
 
 
-async function analyzeAndGenerateJam() {
+async function analyzeAndGenerateJam(marketData) {
     systemState.metrics.totalAnalyses++;
     
     // Read current narrative for JAM metadata
@@ -556,7 +556,7 @@ async function detectAndEmit() {
         console.log(`nonce_update="optimistic_increment" next_nonce=${systemState.currentNonce}`);
 
         console.log(`jam_generation="starting"`);
-        const result = await analyzeAndGenerateJam();
+        const result = await analyzeAndGenerateJam(marketData);
         if (!result) {
             // Rollback nonce if analysis fails
             systemState.currentNonce--;
