@@ -5,6 +5,12 @@ const { ethers } = require('ethers');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+// Add a critical check to ensure the wallet address is configured.
+if (!process.env.WALLET_ADDRESS || process.env.WALLET_ADDRESS === '__YOUR_WALLET_ADDRESS__') {
+  console.error('wallet_address_err=\"not_set\" msg=\"Aborting: WALLET_ADDRESS not configured in .env file.\"');
+  process.exit(1);
+}
+
 const jamStore = require('./jam-store');
 const { bridgeToBSV } = require('./bsv-echo');
 
@@ -148,7 +154,7 @@ function calculateTradeAmount(signalConfidence = 0.9, gasPrice = null, gasCostEt
   }
   
   // Base PHI-aligned trade amount (0.00000618 ETH = φ/1,000,000)
-  const PHI_BASE = 0.00000618;
+  const PHI_BASE = 0.00000618; // φ/1,000,000
   let baseAmount = ethers.utils.parseEther(PHI_BASE.toString());
   
   // Token-specific PHI adjustments for optimal semantic visibility
