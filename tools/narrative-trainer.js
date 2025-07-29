@@ -96,34 +96,131 @@ const cmd = `cd ${motsPath} && ${scrapyPath} crawl blocks.semantic.eth -a start_
 
 const child = exec(cmd, { 
     shell: '/bin/bash', 
-    timeout: 120000, // 2 minute timeout
+    timeout: 300000, // 5 minute timeout
     killSignal: 'SIGTERM',
-    maxBuffer: 1024 * 1024 * 10 // 10MB buffer for scrapy output
+    maxBuffer: 1024 * 1024 * 25, // 25MB buffer for scrapy output
+    env: { ...process.env, PYTHONWARNINGS: 'ignore::DeprecationWarning' } // Suppress Python warnings
   }, (err, stdout, stderr) => {
+    
+    // Handle and filter stderr warnings
+    if (stderr) {
+      const filteredStderr = stderr
+        .split('\n')
+        .filter(line => {
+          // Filter out known harmless warnings
+          return !line.includes('pkg_resources is deprecated') &&
+                 !line.includes('setuptools') &&
+                 !line.includes('UserWarning')
+        })
+        .join('\n')
+        .trim();
+        
+      if (filteredStderr) {
+        console.warn(`train_stderr="${filteredStderr.slice(0, 300)}${filteredStderr.length > 300 ? '...(truncated)' : ''}"`);
+      }
+    }
+    
     if (err) {
-      if (err.killed || err.signal) {
-        console.error(`train_status="fail" narrative="${narrative}" error="training_timeout_killed" signal="${err.signal}"`);
+      // Enhanced error categorization and handling
+      if (err.killed || err.signal === 'SIGTERM') {
+        console.error(`train_status="fail" narrative="${narrative}" error="training_timeout" signal="${err.signal}" timeout="5min"`);
+        console.warn(`timeout_advice="Consider reducing block range or increasing timeout for narrative: ${narrative}"`);
+        
+        // Create fallback model on timeout
+        console.log(`timeout_fallback="creating" narrative="${narrative}"`);
+        createFallbackModel(narrative, outputFile);
+        return;
+      } else if (err.code) {
+        // Handle specific exit codes
+        const errorDetails = {
+          1: 'General error - check MoTS configuration',
+          2: 'Misuse of shell builtins',
+          126: 'Command cannot execute - permission issue',
+          127: 'Command not found - check scrapy installation',
+          130: 'Script terminated by Ctrl+C'
+        };
+        
+        const errorExplanation = errorDetails[err.code] || 'Unknown error code';
+        console.error(`train_status="fail" narrative="${narrative}" error="${err.message}" code="${err.code}" explanation="${errorExplanation}"`);
+        
+        // Specific handling for common errors
+        if (err.code === 127) {
+          console.error(`fix_suggestion="Check that scrapy is properly installed in the Python virtual environment"`);
+        } else if (err.code === 126) {
+          console.error(`fix_suggestion="Check file permissions for ${scrapyPath}"`);
+        }
+        
+        // Create fallback for certain recoverable errors
+        if ([1, 126, 127].includes(err.code)) {
+          console.log(`error_fallback="creating" narrative="${narrative}" reason="recoverable_error"`);
+          createFallbackModel(narrative, outputFile);
+          return;
+        }
       } else {
-        console.error(`train_status="fail" narrative="${narrative}" error="${err.message}" code="${err.code}"`);
+        console.error(`train_status="fail" narrative="${narrative}" error="${err.message}"`);
       }
-      if (stderr && stderr.trim()) {
-        console.error(`stderr="${stderr.trim()}"`);
-      }
+      
       process.exit(1);
     }
     
+    // Process successful output
     if (stdout && stdout.trim()) {
-      console.log(`scrapy_output="${stdout.trim()}"`);
+      // Filter out verbose scrapy startup messages for cleaner logs
+      const cleanOutput = stdout
+        .split('\n')
+        .filter(line => {
+          return !line.includes('Scrapy') && 
+                 !line.includes('Overridden settings') &&
+                 !line.includes('Enabled extensions') &&
+                 line.trim().length > 0;
+        })
+        .join('\n')
+        .trim();
+        
+      if (cleanOutput) {
+        console.log(`scrapy_output="${cleanOutput.slice(0, 500)}${cleanOutput.length > 500 ? '...(truncated)' : ''}"`);
+      }
     }
     
-    // Verify model was created
+    // Verify model was created with additional validation
     if (fs.existsSync(outputFile)) {
-      const stats = fs.statSync(outputFile);
-      console.log(`train_status="success" narrative="${narrative}" model_size="${stats.size}" path="${outputFile}"`);
-      console.log(`next_step="restart_engine" reason="load_new_model"`);
+      try {
+        const stats = fs.statSync(outputFile);
+        
+        // Check if file is not empty
+        if (stats.size === 0) {
+          console.error(`train_status="fail" narrative="${narrative}" reason="empty_model_file" path="${outputFile}"`);
+          console.log(`empty_fallback="creating" narrative="${narrative}"`);
+          createFallbackModel(narrative, outputFile);
+          return;
+        }
+        
+        // Try to parse JSON to ensure it's valid
+        try {
+          const modelContent = fs.readFileSync(outputFile, 'utf8');
+          JSON.parse(modelContent);
+          
+          console.log(`train_status="success" narrative="${narrative}" model_size="${stats.size}" path="${outputFile}" type="mots_generated"`);
+          console.log(`model_validation="passed" json_valid="true"`);
+          console.log(`next_step="restart_engine" reason="load_new_model"`);
+          
+        } catch (parseErr) {
+          console.error(`train_status="fail" narrative="${narrative}" reason="invalid_json" parse_error="${parseErr.message}"`);
+          console.log(`json_fallback="creating" narrative="${narrative}"`);
+          createFallbackModel(narrative, outputFile);
+          return;
+        }
+        
+      } catch (statErr) {
+        console.error(`train_status="fail" narrative="${narrative}" reason="file_stat_error" error="${statErr.message}"`);
+        createFallbackModel(narrative, outputFile);
+        return;
+      }
     } else {
       console.error(`train_status="fail" narrative="${narrative}" reason="model_not_created" expected_path="${outputFile}"`);
-      process.exit(1);
+      console.log(`missing_fallback="creating" narrative="${narrative}"`);
+      createFallbackModel(narrative, outputFile);
+      return;
     }
   });
   
