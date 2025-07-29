@@ -1,7 +1,7 @@
 const { ethers } = require("ethers");
 
 // --- Network and Contract Configuration ---
-const RPC_URLS = (process.env.RPC_URLS || process.env.RPC_URL || 'https://mainnet.base.org').split(',');
+const RPC_URLS = (process.env.RPC_URLS || process.env.RPC_URL || 'https://mainnet.base.org').split(',').map(url => url.trim());
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const VAULT_ADDRESS = process.env.VAULT_ADDRESS;
 const TARGET_CONTRACT_ADDRESS = process.env.TARGET_CONTRACT_ADDRESS;
@@ -33,7 +33,7 @@ const CONSENSUS_TIMES = [
   { hour: 20, minute: 8 }
 ];
 const SUBINTERVALS = [3, 5, 8, 13];
-const BASE_EMISSION_INTERVAL = 900000; // 15 minutes
+const BASE_EMISSION_INTERVAL = 540000; // 9 minutes
 
 module.exports = {
     RPC_URLS,
