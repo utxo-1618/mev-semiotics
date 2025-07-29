@@ -23,6 +23,47 @@ logDirs.forEach(dir => {
   }
 });
 
+// Clear system state lock on startup
+const systemStatePath = path.join(__dirname, 'system-state.json');
+if (fs.existsSync(systemStatePath)) {
+  try {
+    const systemState = JSON.parse(fs.readFileSync(systemStatePath, 'utf8'));
+    // Clear any locks
+    if (systemState.isEmittingLock) {
+      systemState.isEmittingLock.isLocked = false;
+      systemState.isEmittingLock.pid = null;
+      systemState.isEmittingLock.timestamp = null;
+    }
+    fs.writeFileSync(systemStatePath, JSON.stringify(systemState, null, 2));
+    console.log('system_state="cleared_locks"');
+  } catch (e) {
+    console.warn(`system_state_clear_error="${e.message}"`);
+  }
+} else {
+  // Create initial system state if it doesn't exist
+  const initialState = {
+    "lastHash": null,
+    "metrics": {
+      "totalAnalyses": 0,
+      "auditPasses": 0,
+      "auditFails": 0,
+      "emissionSuccesses": 0,
+      "emissionFailures": 0,
+      "lastAuditFailReason": null,
+      "patternSuccess": {},
+      "errorTypes": {}
+    },
+    "isEmittingLock": {
+      "isLocked": false,
+      "pid": null,
+      "timestamp": null
+    },
+    "currentNonce": 0
+  };
+  fs.writeFileSync(systemStatePath, JSON.stringify(initialState, null, 2));
+  console.log('system_state="initialized"');
+}
+
 module.exports = {
   apps: [
     {
@@ -152,6 +193,25 @@ module.exports = {
       merge_logs: true,
       env: {
         NODE_ENV: 'production'
+      }
+    },
+    {
+      name: 'attribution',
+      script: './attribution-monitor.js',
+      cwd: __dirname,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '60s',
+      error_file: './logs/cache/attribution.log',
+      out_file: './logs/cache/attribution.log',
+      merge_logs: true,
+      env: {
+        NODE_ENV: 'production',
+        RPC_URL: process.env.RPC_URL,
+        PRIVATE_KEY: process.env.PRIVATE_KEY,
+        VAULT_ADDRESS: process.env.VAULT_ADDRESS || '0x38bA461686B65C10C1eeffbc4009C7C5Dc27EC26',
+        DMAP_ADDRESS: process.env.DMAP_ADDRESS || '0xb2Ea27Fa784e25C8c03c1E4f2E11300973a8e919',
+        ERROR_LOGGING: process.env.ERROR_LOGGING || 'minimal'
       }
     },
     {
