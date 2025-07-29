@@ -238,9 +238,39 @@ const jamStore = new JAMStore();
 // --- Config and Constants ---
 // All constants are now imported from constants.js at the top of the file
 
-// Initialize provider with primary RPC
-console.log(`provider_init="starting" rpc="${RPC_URLS[0].trim()}"`);
-const provider = new ethers.providers.JsonRpcProvider(RPC_URLS[0].trim());
+// Initialize provider with failover and load balancing
+let provider;
+let currentRpcIndex = 0;
+
+function initializeProvider() {
+    const rpcUrl = RPC_URLS[currentRpcIndex];
+    console.log(`provider_init="starting" rpc="${rpcUrl}"`);
+    try {
+        provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+        console.log(`provider_init="success" rpc="${rpcUrl}"`);
+    } catch (e) {
+        console.error(`provider_init_err="${e.message}" rpc="${rpcUrl}"`);
+        rotateProvider();
+    }
+}
+
+function rotateProvider() {
+    currentRpcIndex = (currentRpcIndex + 1) % RPC_URLS.length;
+    console.log(`provider_rotate="new_rpc" index=${currentRpcIndex} url=${RPC_URLS[currentRpcIndex]}`);
+    initializeProvider();
+}
+
+// Initial provider initialization
+initializeProvider();
+
+
+// Add a listener for provider errors to trigger rotation
+if(provider.on) {
+    provider.on('error', (err) => {
+        console.error(`provider_error="${err.message}"`);
+        rotateProvider();
+    });
+}
 
 // Validate private key and create wallet
 if (!PRIVATE_KEY) {
