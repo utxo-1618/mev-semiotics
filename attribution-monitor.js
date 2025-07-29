@@ -13,7 +13,7 @@ const MIN_SIMILARITY_THRESHOLD = 0.8; // 80% pattern match required
 
 class AttributionMonitor {
     constructor() {
-        this.provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'https://mainnet.base.org');
+        this.provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL || 'https://mainnet.base.org');
         this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         
         // Contract interfaces
@@ -58,25 +58,39 @@ class AttributionMonitor {
     // Load signals from JAM store
     async loadActiveSignals() {
         try {
-            const jamStore = require('./jam-store');
-            const allJams = jamStore.getAll();
+            // Load JAMs directly from jams directory
+            const jamsPath = path.join(__dirname, 'jams');
+            if (!fs.existsSync(jamsPath)) {
+                console.log('signals_loaded="0" status="no_jams_directory"');
+                return;
+            }
             
-            for (const jam of allJams) {
-                if (jam.hash && jam.meta?.audit_pass) {
-                    // Extract pattern from JAM
-                    const pattern = this.extractPattern(jam);
-                    this.activeSignals.set(jam.hash, {
-                        txHash: jam.meta.txHash,
-                        timestamp: jam.meta.timestamp || Date.now(),
-                        amplificationTimestamp: jam.meta.amplificationTimestamp,
-                        pattern: pattern,
-                        proverb: jam.proverb,
-                        recursiveDepth: jam.cascadeDepth || 1
-                    });
+            const jamFiles = fs.readdirSync(jamsPath).filter(f => f.endsWith('.json'));
+            
+            for (const jamFile of jamFiles) {
+                try {
+                    const jamPath = path.join(jamsPath, jamFile);
+                    const jamData = JSON.parse(fs.readFileSync(jamPath, 'utf8'));
+                    
+                    if (jamData.hash && jamData.meta?.audit_pass) {
+                        // Extract pattern from JAM
+                        const pattern = this.extractPattern(jamData);
+                        this.activeSignals.set(jamData.hash, {
+                            txHash: jamData.meta.txHash,
+                            timestamp: jamData.meta.timestamp || Date.now(),
+                            amplificationTimestamp: jamData.meta.amplificationTimestamp,
+                            pattern: pattern,
+                            proverb: jamData.proverb,
+                            recursiveDepth: jamData.cascadeDepth || 1
+                        });
+                    }
+                } catch (jamError) {
+                    // Skip invalid JAM files
+                    continue;
                 }
             }
             
-            console.log(`signals_loaded="${this.activeSignals.size}" status="monitoring"`)
+            console.log(`signals_loaded="${this.activeSignals.size}" status="monitoring"`);
         } catch (e) {
             console.error(`signal_load_error="${e.message}"`);
         }
@@ -162,11 +176,11 @@ class AttributionMonitor {
             const similarity = this.calculatePatternSimilarity(signal.pattern, txPattern);
             
             if (similarity >= MIN_SIMILARITY_THRESHOLD) {
-                // Calculate yield from this transaction
-                const yield = await this.calculateTransactionYield(tx, receipt);
-                
-                if (yield > 0) {
-                    await this.attestYield(signalHash, tx.from, yield, similarity);
+            // Calculate yield from this transaction
+            const yieldAmount = await this.calculateTransactionYield(tx, receipt);
+            
+            if (yieldAmount > 0) {
+                await this.attestYield(signalHash, tx.from, yieldAmount, similarity);
                 }
             }
         }
@@ -355,8 +369,8 @@ class AttributionMonitor {
             totalYield: 0n
         };
         
-        for (const yield of this.attributedYields.values()) {
-            stats.totalYield += yield;
+        for (const yieldValue of this.attributedYields.values()) {
+            stats.totalYield += yieldValue;
         }
         
         return {
