@@ -527,15 +527,11 @@ async function detectAndEmit() {
         // Get current fee data from Base network
         const feeData = await provider.getFeeData();
         
-        // Small PHI-aligned fees for Base network (~$0.001 per tx)
-        // Slightly increased from minimal to ensure emission without overpaying
-        const maxPriorityFeePerGas = ethers.utils.parseUnits('0.00618', 'gwei'); // PHI * 3.8 for inclusion
+        // Ultra-minimal, phi-aligned fees for Base L2.
+        const maxPriorityFeePerGas = ethers.utils.parseUnits('0.001618', 'gwei'); // Minimal inclusion bribe
+        const maxFeePerGas = baseFee.mul(110).div(100).add(maxPriorityFeePerGas); // 1.1x base fee + priority
         
-        // Use modest PHI multiplier for Base - 1.38x base fee plus priority
-        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.02', 'gwei');
-        const maxFeePerGas = baseFee.mul(138).div(100).add(maxPriorityFeePerGas); // 1.38x base + PHI priority
-        
-        console.log(`gas_fees: maxFeePerGas=${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei, maxPriorityFeePerGas=${ethers.utils.formatUnits(maxPriorityFeePerGas, 'gwei')} gwei`);
+        console.log(`gas_fees_optimized: maxFeePerGas=${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei, maxPriorityFeePerGas=${ethers.utils.formatUnits(maxPriorityFeePerGas, 'gwei')} gwei`);
 
         // Check balance before attempting transaction submission
         if (!(await checkSufficientBalance())) {
