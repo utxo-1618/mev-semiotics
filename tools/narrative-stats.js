@@ -50,3 +50,4 @@ if (Object.keys(narrativePerformance).length === 0) {
     const totalYield = sorted.reduce((sum, [,stats]) => sum + stats.totalYield, 0);
     const totalSignals = sorted.reduce((sum, [,stats]) => sum + stats.totalSignals, 0);
     console.log(`summary="totals" yield="${totalYield.toFixed(6)}" signals="${totalSignals}"`);
+}
