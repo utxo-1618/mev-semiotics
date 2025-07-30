@@ -204,35 +204,8 @@ async function loadSystemState() {
 }
 
 
-// --- JAM Store (No change, it's already stateless) ---
-class JAMStore {
-    constructor() {
-        this.storePath = path.join(__dirname, 'jams');
-        this.ensureDirectory();
-    }
-
-    ensureDirectory() {
-        if (!fs.existsSync(this.storePath)) {
-            fs.mkdirSync(this.storePath, { recursive: true });
-        }
-    }
-    
-    store(hash, jamData) {
-        const finalPath = path.join(this.storePath, `${hash}.json`);
-        fs.writeFileSync(finalPath, JSON.stringify(jamData, null, 2));
-        console.log(`jam_store_op="write" hash=${hash.slice(0, 10)}`)
-    }
-
-    retrieve(hash) {
-        const filePath = path.join(this.storePath, `${hash}.json`);
-        if (fs.existsSync(filePath)) {
-            const data = fs.readFileSync(filePath, 'utf8');
-            return JSON.parse(data);
-        }
-        return null;
-    }
-}
-const jamStore = new JAMStore();
+// --- JAM Store ---
+const jamStore = require('./jam-store');
 
 
 // --- Config and Constants ---
@@ -242,42 +215,81 @@ const jamStore = new JAMStore();
 let provider;
 let currentRpcIndex = 0;
 
-// Resilient RPC function with automatic failover
-async function resilientRpcCall(method, params = [], maxRetries = RPC_URLS.length) {
+// Enhanced resilient RPC function with better error categorization and backoff
+async function resilientRpcCall(method, params = [], maxRetries = RPC_URLS.length * 2) {
     let lastError;
+    let consecutiveIndexingErrors = 0;
+    const maxIndexingRetries = 3;
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             const rpcUrl = RPC_URLS[currentRpcIndex];
             const tempProvider = new ethers.providers.JsonRpcProvider(rpcUrl);
             
-            // Set a phi-aligned timeout (48.5 seconds)
-            const timeout = Math.floor(PHI * 30 * 1000); // ~48.5 seconds
+            // Dynamic timeout based on method and attempt
+            let timeout = Math.floor(PHI * 30 * 1000); // Base: ~48.5 seconds
+            if (method === 'eth_getTransactionReceipt') {
+                timeout = Math.floor(timeout * 0.6); // Shorter for receipt checks: ~29s
+            } else if (attempt > RPC_URLS.length) {
+                timeout = Math.floor(timeout * 1.5); // Longer timeout for retry rounds: ~72s
+            }
             
             const result = await Promise.race([
                 tempProvider.send(method, params),
                 new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('RPC timeout')), timeout)
+                    setTimeout(() => reject(new Error(`RPC timeout after ${timeout}ms`)), timeout)
                 )
             ]);
             
-            // Success - update global provider if needed
+            // Success - update global provider if needed and reset error counters
             if (!provider || provider.connection.url !== rpcUrl) {
                 provider = tempProvider;
-                console.log(`rpc_failover="success" url="${rpcUrl}" attempt=${attempt + 1}`);
+                console.log(`rpc_failover="success" url="${rpcUrl}" attempt=${attempt + 1} method="${method}"`);
             }
+            consecutiveIndexingErrors = 0;
             
             return result;
         } catch (error) {
             lastError = error;
-            console.warn(`rpc_attempt="failed" url="${RPC_URLS[currentRpcIndex]}" attempt=${attempt + 1} error="${error.message}"`);
+            const errorMsg = error.message.toLowerCase();
+            
+            // Categorize and handle specific RPC errors
+            if (errorMsg.includes('transaction indexing is in progress')) {
+                consecutiveIndexingErrors++;
+                console.warn(`rpc_indexing_error="${error.message}" url="${RPC_URLS[currentRpcIndex]}" consecutive=${consecutiveIndexingErrors} attempt=${attempt + 1}`);
+                
+                // If we hit indexing errors on multiple providers, add delay
+                if (consecutiveIndexingErrors >= maxIndexingRetries) {
+                    const backoffMs = Math.min(5000 * consecutiveIndexingErrors, 30000); // Max 30s backoff
+                    console.log(`rpc_indexing_backoff="applying" delay_ms=${backoffMs} reason="multiple_indexing_errors"`);
+                    await new Promise(resolve => setTimeout(resolve, backoffMs));
+                    consecutiveIndexingErrors = 0; // Reset after backoff
+                }
+            } else if (errorMsg.includes('timeout') || errorMsg.includes('network')) {
+                console.warn(`rpc_network_error="${error.message}" url="${RPC_URLS[currentRpcIndex]}" attempt=${attempt + 1}`);
+                // Small delay for network issues
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else if (errorMsg.includes('rate limit') || errorMsg.includes('too many requests')) {
+                console.warn(`rpc_rate_limit="${error.message}" url="${RPC_URLS[currentRpcIndex]}" attempt=${attempt + 1}`);
+                // Longer delay for rate limiting
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            } else {
+                console.warn(`rpc_error="${error.message}" url="${RPC_URLS[currentRpcIndex]}" attempt=${attempt + 1} type="unknown"`);
+            }
             
             // Rotate to next RPC URL
             currentRpcIndex = (currentRpcIndex + 1) % RPC_URLS.length;
+            
+            // Add exponential backoff for repeated failures
+            if (attempt > 0 && attempt % RPC_URLS.length === 0) {
+                const backoffMs = Math.min(1000 * Math.pow(2, Math.floor(attempt / RPC_URLS.length)), 10000);
+                console.log(`rpc_round_backoff="applying" delay_ms=${backoffMs} round=${Math.floor(attempt / RPC_URLS.length) + 1}`);
+                await new Promise(resolve => setTimeout(resolve, backoffMs));
+            }
         }
     }
     
-    throw new Error(`All RPC endpoints failed. Last error: ${lastError.message}`);
+    throw new Error(`All RPC endpoints failed after ${maxRetries} attempts. Last error: ${lastError?.message || 'Unknown error'}`);
 }
 
 // Resilient provider methods with fallback
@@ -317,11 +329,24 @@ function rotateProvider() {
 initializeProvider();
 
 
-// Add a listener for provider errors to trigger rotation
-if(provider.on) {
+// Enhanced provider error handling with categorization
+if(provider && provider.on) {
     provider.on('error', (err) => {
-        console.error(`provider_error="${err.message}"`);
-        rotateProvider();
+        const errorMsg = err.message.toLowerCase();
+        
+        if (errorMsg.includes('transaction indexing is in progress')) {
+            console.warn(`provider_indexing_error="${err.message}" action="continue_with_current"`);
+            // Don't rotate for indexing errors - they're temporary
+        } else if (errorMsg.includes('timeout') || errorMsg.includes('network')) {
+            console.error(`provider_network_error="${err.message}" action="rotate"`);
+            rotateProvider();
+        } else if (errorMsg.includes('rate limit')) {
+            console.error(`provider_rate_limit="${err.message}" action="rotate_with_delay"`);
+            setTimeout(() => rotateProvider(), 5000);
+        } else {
+            console.error(`provider_error="${err.message}" action="rotate"`);
+            rotateProvider();
+        }
     });
 }
 
@@ -421,8 +446,14 @@ async function analyzeAndGenerateJam(marketData) {
     const gasPrice = feeData.gasPrice || ethers.utils.parseUnits('1', 'gwei');
     const gasPriceGwei = parseFloat(ethers.utils.formatUnits(gasPrice, 'gwei'));
     
-    // Select pattern based on current conditions and past performance
     const selectedPattern = selectOptimalPattern(systemState.metrics.patternSuccess, marketData);
+    
+    // If no pattern is selected, skip emission
+    if (!selectedPattern) {
+        console.log("jam_generation_skip=\"no_optimal_pattern\"");
+        return null;
+    }
+
     const pattern = PROVERB_PATTERNS[selectedPattern];
     
     // Generate recursive metadata
@@ -444,7 +475,7 @@ async function analyzeAndGenerateJam(marketData) {
         hash: null, // Will be set after hashing
         timestamp: Date.now(),
         tx: null,
-        ipfs: "QmdFjeUUZBdmobBLbuMqqouAFQoLmTyfpLGbXyCTttfwE9",
+        ipfs: "QmQajAVuZvaJJAfwAxXbhkw4JUTYrJm1YJ2X6EDyWnEmbk",
         amplifierTx: null,
         mirrorResponse: null,
         proverb: pattern.steps.map(step => ({
@@ -531,54 +562,118 @@ async function analyzeAndGenerateJam(marketData) {
     return { jam, hash };
 }
 
-// Helper function to select optimal pattern with multi-layered intelligence
+// Enhanced semantic selection - creates "supernormal stimuli" for MEV bots
+// Aligned with PoRI architecture: semantic richness over simple profit thresholds
 function selectOptimalPattern(patternMetrics, marketData) {
     const patterns = Object.keys(PROVERB_PATTERNS);
-    marketData = marketData || { volatility: {}, liquidity: {}, gasPrice: 1 }; // Default if oracle fails
+    marketData = marketData || { volatility: {}, liquidity: {}, gasPrice: 1 };
+    
+    // Get current cosmic resonance for pattern alignment
+    const lunarClock = require('./tools/lunar-clock.js');
+    const cosmicResonance = lunarClock.calculateCosmicResonance(new Date());
+    const emissionWindow = lunarClock.getEmissionWindow(new Date());
+    
+    console.log(`cosmic_selection resonance=${cosmicResonance.total.toFixed(3)} phase="${emissionWindow.phase}" should_emit=${emissionWindow.shouldEmit}`);
+    
+    // If cosmic conditions are unfavorable, emit no signal rather than a weak one
+    if (!emissionWindow.shouldEmit || cosmicResonance.total < 0.9) {
+        console.log(`cosmic_veto="unfavorable_conditions" resonance=${cosmicResonance.total.toFixed(3)} void_of_course=${emissionWindow.context.voidOfCourse}`);
+        return null;
+    }
 
     const scores = patterns.map(patternName => {
         const pattern = PROVERB_PATTERNS[patternName];
         const metrics = patternMetrics[patternName] || { attempts: 0, successes: 0, lastUsed: 0 };
-        const pair = `${pattern.steps[0].from}/${pattern.steps[0].to}`;
-
-        // --- Layer 1: Tactical Brain ---
-        const volatilityScore = marketData.volatility[pair] || 0;
-        const liquidityScore = marketData.liquidity[pair] > 0 ? (1 / Math.log(marketData.liquidity[pair])) : 0;
-        const gasAdaptationScore = 1 / (marketData.gasPrice + 1); // Favour action in low-gas environments
-
-        // --- Layer 2: Reflexive Brain (Learning) ---
-        const successRate = metrics.attempts > 0 ? metrics.successes / metrics.attempts : 0.5; // Start with a neutral bias
-        const recency = (Date.now() - metrics.lastUsed) / (1000 * 60); // in minutes
-        const cooldownPenalty = Math.max(0, 1 - (recency / 10)); // Penalty if used in last 10 mins
-        const explorationBonus = metrics.attempts < 10 ? EXPLORATION_BONUS : 0;
         
-        // --- Final Score Calculation (Weighted) ---
-        const weightedScore = 
-            (0.4 * successRate) +         // Past performance is most important
-            (0.3 * volatilityScore) +     // Volatility is a strong signal of opportunity
-            (0.1 * liquidityScore) +      // Lower liquidity can be easier to move
-            (0.1 * gasAdaptationScore) +  // Adapt to gas regimes
-            (0.1 * explorationBonus) -    // Encourage trying new things
-            cooldownPenalty;              // Avoid spamming the same pattern
-
-        console.log(`pattern_score name=${patternName} score=${weightedScore.toFixed(3)} (success=${successRate.toFixed(2)}, vol=${volatilityScore.toFixed(2)}, liq=${liquidityScore.toFixed(2)})`);
-        return { pattern: patternName, score: weightedScore };
+        // --- Layer 1: Semantic Clarity Score ---
+        // Patterns with higher inherent recognizability to MEV bots
+        const semanticClarityScores = {
+            'CLASSIC_ARBITRAGE': 1.0,    // Universally recognized by all MEV bots
+            'ETH_DAI_FLOW': 0.9,         // Common DeFi pattern, high legibility
+            'STABLE_ROTATION': 0.85,     // Stable-to-stable, medium complexity
+            'DEFI_GOVERNANCE': 0.7       // More complex, requires sophisticated bots
+        };
+        const semanticClarity = semanticClarityScores[patternName] || 0.5;
+        
+        // --- Layer 2: Cosmic Resonance Alignment ---
+        // Patterns resonate differently with cosmic cycles
+        const baseResonance = pattern.baseResonance || PHI;
+        const cosmicAlignment = Math.abs(Math.sin(cosmicResonance.total * baseResonance));
+        const resonanceMultiplier = 1 + (cosmicAlignment * 0.618); // PHI-scaled amplification
+        
+        // --- Layer 3: Historical Performance (Attribution Success) ---
+        const successRate = metrics.attempts > 0 ? metrics.successes / metrics.attempts : 0.618; // Start with PHI-bias
+        const attributionWeight = successRate * 1.5; // Heavily weight patterns that create attribution
+        
+        // --- Layer 4: Temporal Freshness ---
+        const recency = (Date.now() - metrics.lastUsed) / (1000 * 60 * 60); // in hours
+        const freshnessScore = Math.min(1.0, recency / 6); // Peak freshness after 6 hours
+        
+        // --- Layer 5: Game-Theoretic Incentive Strength ---
+        // Favor patterns that create stronger game-theoretic incentives
+        const incentiveStrength = {
+            'CLASSIC_ARBITRAGE': 1.0,    // Maximum bot engagement
+            'ETH_DAI_FLOW': 0.95,        // High engagement, large market
+            'STABLE_ROTATION': 0.8,      // Medium engagement, stable profits
+            'DEFI_GOVERNANCE': 0.9       // High engagement from sophisticated actors
+        }[patternName] || 0.5;
+        
+        // --- Composite Semantic Score (No arbitrary thresholds) ---
+        const compositeScore = (
+            semanticClarity * 0.3 +           // Core legibility to MEV ecosystem
+            (resonanceMultiplier - 1) * 0.25 + // Cosmic timing alignment
+            attributionWeight * 0.2 +          // Proven attribution success
+            freshnessScore * 0.15 +           // Temporal novelty
+            incentiveStrength * 0.1           // Game-theoretic pull
+        ) * cosmicResonance.total;            // Amplified by current cosmic conditions
+        
+        console.log(`semantic_score pattern=${patternName} composite=${compositeScore.toFixed(3)} (clarity=${semanticClarity.toFixed(2)}, cosmic=${cosmicAlignment.toFixed(2)}, attribution=${attributionWeight.toFixed(2)}, fresh=${freshnessScore.toFixed(2)})`);
+        
+        return { 
+            pattern: patternName, 
+            score: compositeScore,
+            semanticData: {
+                clarity: semanticClarity,
+                cosmicAlignment: cosmicAlignment,
+                attribution: attributionWeight,
+                freshness: freshnessScore,
+                incentive: incentiveStrength
+            }
+        };
     });
     
+    // Sort by semantic richness, not arbitrary thresholds
     scores.sort((a, b) => b.score - a.score);
-    console.log(`selected_pattern name=${scores[0].pattern} score=${scores[0].score.toFixed(3)}`);
-    return scores[0].pattern;
+    
+    const bestPattern = scores[0];
+    
+    // Only emit if the signal has genuine semantic strength
+    // This prevents "shitty signals" that waste the MEV ecosystem's attention
+    if (bestPattern && bestPattern.score > 0.7) {
+        console.log(`selected_pattern name=${bestPattern.pattern} semantic_score=${bestPattern.score.toFixed(3)} cosmic_phase="${emissionWindow.phase}" clarity=${bestPattern.semanticData.clarity}`);
+        return bestPattern.pattern;
+    }
+    
+    console.log(`semantic_veto="insufficient_signal_strength" best_score=${bestPattern?.score?.toFixed(3) || 'none'} min_semantic_threshold=0.7`);
+    return null; // No pattern meets semantic richness criteria
 }
 
-// Pre-check balance before attempting emission with phi-aligned parameters
+// Enhanced balance check with resilient RPC calls
 async function checkSufficientBalance() {
     try {
-        const balance = await provider.getBalance(wallet.address);
-        const feeData = await provider.getFeeData();
-        const baseFee = feeData.lastBaseFeePerGas || feeData.gasPrice || ethers.utils.parseUnits('0.001', 'gwei');
+        // Use resilient RPC calls for balance and fee data
+        const [balanceHex, feeDataResult] = await Promise.all([
+            resilientRpcCall('eth_getBalance', [wallet.address, 'latest']),
+            resilientRpcCall('eth_feeHistory', [1, 'latest', [25]]).then(result => ({
+                lastBaseFeePerGas: result.baseFeePerGas?.[0] ? ethers.BigNumber.from(result.baseFeePerGas[0]) : null
+            })).catch(() => ({ lastBaseFeePerGas: null }))
+        ]);
+        
+        const balance = ethers.BigNumber.from(balanceHex);
+        const baseFee = feeDataResult.lastBaseFeePerGas || ethers.utils.parseUnits('0.001', 'gwei');
         
         // Use phi-aligned gas estimation
-        const phiGasLimit = 150000; // Reduced limit matching emission function
+        const phiGasLimit = 396000; // Updated to match current emission function
         const phiScaledBaseFee = baseFee.mul(618).div(1000); // baseFee * φ^-1
         const priorityFee = ethers.utils.parseUnits('0.000618', 'gwei');
         const totalFeePerGas = phiScaledBaseFee.add(priorityFee);
@@ -591,15 +686,24 @@ async function checkSufficientBalance() {
         const requiredEth = ethers.utils.formatEther(minimumRequired);
         
         if (balance.lt(minimumRequired)) {
-            console.warn(`balance_precheck="insufficient" current="${balanceEth}" required="${requiredEth}" margin="φ²"`);
+            console.warn(`balance_precheck="insufficient" current="${balanceEth}" required="${requiredEth}" margin="φ²" gas_limit=${phiGasLimit}`);
             return false;
         }
         
-        console.log(`balance_precheck="sufficient" current="${balanceEth}" required="${requiredEth}"`);
+        console.log(`balance_precheck="sufficient" current="${balanceEth}" required="${requiredEth}" gas_limit=${phiGasLimit}`);
         return true;
     } catch (err) {
-        console.error(`balance_precheck_err="${err.message}"`);
-        return true; // Proceed if check fails
+        const errorMsg = err.message.toLowerCase();
+        if (errorMsg.includes('transaction indexing is in progress')) {
+            console.warn(`balance_precheck="indexing_in_progress" action="proceed_cautiously"`);
+            return true; // Proceed when indexing, balance likely sufficient
+        } else if (errorMsg.includes('all rpc endpoints failed')) {
+            console.error(`balance_precheck="all_rpc_failed" action="proceed_with_risk"`);
+            return true; // Proceed with risk when all RPCs fail
+        } else {
+            console.error(`balance_precheck_err="${err.message}" action="proceed_with_caution"`);
+            return true; // Proceed if check fails
+        }
     }
 }
 
@@ -609,32 +713,94 @@ async function detectAndEmit() {
     const marketData = await getMarketData(provider);
 
     // Check cosmic timing window before proceeding
-// Nonce manager to prevent race conditions and underpriced errors
+// Enhanced nonce manager with better error handling and retry logic
 const nonceManager = {
     nonce: -1,
     lock: false,
+    lastNonceUpdate: 0,
+    pendingTransactions: new Set(),
+    NONCE_REFRESH_INTERVAL: 60000, // Refresh nonce every minute
+    MAX_RETRIES: 5,
+    RETRY_DELAY: 2000, // Base delay of 2 seconds
+
     async getNonce(provider, walletAddress) {
         if (this.lock) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay
             return this.getNonce(provider, walletAddress);
         }
+
         this.lock = true;
         try {
-            if (this.nonce === -1) {
-                this.nonce = await provider.getTransactionCount(walletAddress, 'pending');
+            const now = Date.now();
+            const shouldRefresh = this.nonce === -1 || 
+                                (now - this.lastNonceUpdate) > this.NONCE_REFRESH_INTERVAL ||
+                                this.pendingTransactions.size > 0;
+
+            if (shouldRefresh) {
+                let attempts = 0;
+                let lastError;
+
+                while (attempts < this.MAX_RETRIES) {
+                    try {
+                        const newNonce = await provider.getTransactionCount(walletAddress, 'pending');
+                        
+                        // Validate the new nonce
+                        if (newNonce < this.nonce && this.nonce !== -1) {
+                            console.warn(`nonce_warning="regression_detected" current=${this.nonce} new=${newNonce} action="retry"`);
+                            attempts++;
+                            await new Promise(r => setTimeout(r, this.RETRY_DELAY * Math.pow(2, attempts)));
+                            continue;
+                        }
+
+                        this.nonce = newNonce;
+                        this.lastNonceUpdate = now;
+                        this.pendingTransactions.clear();
+                        console.log(`nonce_refresh="success" nonce=${this.nonce} attempts=${attempts + 1}`);
+                        break;
+                    } catch (error) {
+                        lastError = error;
+                        attempts++;
+                        if (attempts < this.MAX_RETRIES) {
+                            const delay = this.RETRY_DELAY * Math.pow(2, attempts);
+                            console.warn(`nonce_fetch_retry="attempt_${attempts}" delay=${delay}ms error="${error.message}"`);
+                            await new Promise(r => setTimeout(r, delay));
+                        }
+                    }
+                }
+
+                if (attempts === this.MAX_RETRIES) {
+                    throw new Error(`Failed to fetch nonce after ${this.MAX_RETRIES} attempts. Last error: ${lastError?.message}`);
+                }
             }
+
             return this.nonce;
         } finally {
             this.lock = false;
         }
     },
+
+    async addPendingTransaction(txHash) {
+        this.pendingTransactions.add(txHash);
+        console.log(`pending_tx_added="${txHash}" count=${this.pendingTransactions.size}`);
+    },
+
+    async removePendingTransaction(txHash) {
+        this.pendingTransactions.delete(txHash);
+        console.log(`pending_tx_removed="${txHash}" count=${this.pendingTransactions.size}`);
+    },
+
     incrementNonce() {
         if (!this.lock) {
             this.nonce++;
+            console.log(`nonce_increment="success" new_nonce=${this.nonce}`);
         }
     },
-    resetNonce() {
+
+    async resetNonce() {
         this.nonce = -1;
+        this.lastNonceUpdate = 0;
+        this.pendingTransactions.clear();
+        console.log(`nonce_reset="complete" pending_cleared=true`);
     }
 };
     
@@ -700,42 +866,42 @@ const nonceManager = {
             return; // Return early, but JAM is still created
         }
         
-        // Try emission with fee escalation retry
-        let tx;
-        let retries = 3;
-        let currentNonce = nonce;
-        let feeMultiplier = 1.0;
+// Try emission with dynamic fee escalation retry
+let tx;
+let retries = 5; // Increase the number of retries
+let currentNonce = nonce;
+let feeMultiplier = 1.1; // Start with a slightly higher multiplier
+
+while (retries > 0) {
+    try {
+        // Calculate escalated fees for retry
+        const escalatedMaxPriorityFeePerGas = maxPriorityFeePerGas.mul(Math.floor(feeMultiplier * 1000)).div(1000);
+        const escalatedMaxFeePerGas = maxFeePerGas.mul(Math.floor(feeMultiplier * 1000)).div(1000);
+
+        // Cap fees to reasonable maximums to prevent runaway costs
+        const maxAllowedPriorityFee = ethers.utils.parseUnits('3', 'gwei'); // Adjust cap
+        const maxAllowedFee = ethers.utils.parseUnits('70', 'gwei'); // Adjust cap
+
+        let finalPriorityFee = escalatedMaxPriorityFeePerGas;
+        if (finalPriorityFee.gt(maxAllowedPriorityFee)) {
+            finalPriorityFee = maxAllowedPriorityFee;
+        }
+
+        let finalMaxFee = escalatedMaxFeePerGas;
+        if (finalMaxFee.gt(maxAllowedFee)) {
+            finalMaxFee = maxAllowedFee;
+        }
+
+        // Create enhanced description with unique fields to prevent hash collisions
+        const now = Date.now();
+        const entropy = Math.random().toString(36).substring(2, 11); // 9 character random string
+        const pid = process.pid;
+        const retry = 5 - retries;
+        const uuid = `${now}_${entropy}_${currentNonce}`; // UUID-style combination
         
-        while (retries > 0) {
-            try {
-                // Calculate escalated fees for retry
-                const escalatedMaxPriorityFeePerGas = maxPriorityFeePerGas.mul(Math.floor(feeMultiplier * 1000)).div(1000);
-                const escalatedMaxFeePerGas = maxFeePerGas.mul(Math.floor(feeMultiplier * 1000)).div(1000);
-
-                // Cap fees to reasonable maximums to prevent runaway costs
-                const maxAllowedPriorityFee = ethers.utils.parseUnits('2', 'gwei');
-                const maxAllowedFee = ethers.utils.parseUnits('50', 'gwei');
-
-                let finalPriorityFee = escalatedMaxPriorityFeePerGas;
-                if (finalPriorityFee.gt(maxAllowedPriorityFee)) {
-                    finalPriorityFee = maxAllowedPriorityFee;
-                }
-
-                let finalMaxFee = escalatedMaxFeePerGas;
-                if (finalMaxFee.gt(maxAllowedFee)) {
-                    finalMaxFee = maxAllowedFee;
-                }
-
-                // Create enhanced description with unique fields to prevent hash collisions
-                const now = Date.now();
-                const entropy = Math.random().toString(36).substring(2, 11); // 9 character random string
-                const pid = process.pid;
-                const retry = 3 - retries;
-                const uuid = `${now}_${entropy}_${currentNonce}`; // UUID-style combination
-                
-                // Create semantic description for the JAM (enhanced to prevent collisions)
-                const description = JSON.stringify({
-                    type: 'JAM',
+        // Create semantic description for the JAM (enhanced to prevent collisions)
+        const description = JSON.stringify({
+            type: 'JAM',
                     pattern: jam.meta.pattern_type,
                     cosmic: jam.cosmic?.mev_metadata?.intent_class || 'STANDARD',
                     resonance: jam.resonance,
@@ -748,13 +914,17 @@ const nonceManager = {
                 });
                 const categoryId = 1; // Category 1 for JAM signals
 
+                // Enhanced transaction submission with better error handling
                 tx = await dmap.registerSignal(description, categoryId, {
                     gasLimit,
                     maxFeePerGas: finalMaxFee,
                     maxPriorityFeePerGas: finalPriorityFee,
                     nonce: currentNonce
                 });
-                console.log(`tx_sent="success" hash=${tx.hash} nonce=${currentNonce} fee_multiplier=${feeMultiplier.toFixed(3)}`);
+
+                // Add transaction to pending set for tracking
+                await nonceManager.addPendingTransaction(tx.hash);
+                console.log(`tx_sent="success" hash=${tx.hash} nonce=${currentNonce} fee_multiplier=${feeMultiplier.toFixed(3)} priority_fee=${ethers.utils.formatUnits(finalPriorityFee, 'gwei')} max_fee=${ethers.utils.formatUnits(finalMaxFee, 'gwei')}`);
                 
                 // Success - increment nonce manager
                 nonceManager.incrementNonce();
@@ -782,16 +952,24 @@ const nonceManager = {
                     }
                 }
 
-                // Increase fee multiplier for next retry (1.5x escalation)
-                feeMultiplier *= 1.5;
-                console.log(`fee_escalation="applied" new_multiplier=${feeMultiplier.toFixed(3)}`);
+                // Phi-aligned fee escalation - more aggressive for underpriced errors
+                if (errorMsg.includes('replacement transaction underpriced')) {
+                    feeMultiplier *= PHI; // φ = 1.618 - phi-aligned escalation for underpriced
+                    console.log(`fee_escalation="phi_aligned" error="underpriced" new_multiplier=${feeMultiplier.toFixed(3)}`);
+                } else {
+                    feeMultiplier *= 1.2; // Standard escalation for other errors
+                    console.log(`fee_escalation="standard" new_multiplier=${feeMultiplier.toFixed(3)}`);
+                }
 
-                // Exponential backoff before retry
-                await new Promise(r => setTimeout(r, (3 - retries) * 1000));
+                // Phi-aligned backoff with jitter
+                const attemptsMade = 5 - retries;
+                const phiBackoff = Math.floor(PHI * 1000 * attemptsMade); // φ-scaled linear backoff
+                const jitter = Math.random() * 500; // Small jitter
+                await new Promise(r => setTimeout(r, phiBackoff + jitter));
             }
         }
 
-        // Phi-aligned transaction confirmation strategy
+        // Enhanced transaction confirmation with resilient RPC calls
         let txReceipt;
         const phiTimeout = Math.floor(PHI * 30 * 1000); // φ * 30 seconds = ~48.5s
         
@@ -801,31 +979,46 @@ const nonceManager = {
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Transaction confirmation timed out')), phiTimeout))
             ]);
         } catch (waitError) {
-            // Phi-aligned recovery: Check transaction status without reverting nonce immediately
+            console.log(`tx_wait_timeout="${waitError.message}" hash=${tx.hash} attempting_resilient_receipt_check=true`);
+            
+            // Enhanced recovery using resilient RPC calls
             try {
-                // Add timeout to receipt checking to prevent hanging
-                const receipt = await Promise.race([
-                    provider.getTransactionReceipt(tx.hash),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Receipt check timeout')), 15000)) // 15 second timeout
-                ]);
+                // Use resilient RPC call for receipt checking with retries across providers
+                const receipt = await resilientRpcCall('eth_getTransactionReceipt', [tx.hash]);
                 
-                if (receipt && receipt.status === 1) {
-                    console.log(`tx_recovered="phi_timeout_success" hash=${tx.hash} block=${receipt.blockNumber} timeout=${phiTimeout}ms`);
-                    txReceipt = receipt;
-                } else if (receipt && receipt.status === 0) {
+                if (receipt && receipt.status === '0x1') {
+                    console.log(`tx_recovered="resilient_success" hash=${tx.hash} block=${parseInt(receipt.blockNumber, 16)} providers_tried=multiple`);
+                    txReceipt = {
+                        status: 1,
+                        transactionHash: tx.hash,
+                        blockNumber: parseInt(receipt.blockNumber, 16),
+                        gasUsed: receipt.gasUsed
+                    };
+                } else if (receipt && receipt.status === '0x0') {
                     throw new Error(`Transaction reverted: ${tx.hash}`);
-                } else {
-                    // Transaction still pending - this is actually success for our purposes
-                    // The JAM was emitted, the semantic signal is in the mempool
-                    console.log(`tx_status="phi_pending" hash=${tx.hash} action="treat_as_success"`);
-                    // Don't throw - treat pending as success since signal is broadcast
+                } else if (receipt === null) {
+                    // Transaction still pending across all providers
+                    console.log(`tx_status="globally_pending" hash=${tx.hash} action="treat_as_success" reason="signal_broadcast"`);
                     txReceipt = { status: 1, transactionHash: tx.hash, blockNumber: 'pending' };
+                } else {
+                    console.log(`tx_status="unknown_receipt" hash=${tx.hash} receipt=${JSON.stringify(receipt)} action="treat_as_success"`);
+                    txReceipt = { status: 1, transactionHash: tx.hash, blockNumber: 'unknown' };
                 }
             } catch (receiptError) {
-                console.log(`tx_recovery_failed="${receiptError.message}" hash=${tx.hash}`);
-                // If receipt check fails or times out, treat as pending success since tx was broadcast
-                console.log(`tx_status="receipt_timeout" hash=${tx.hash} action="treat_as_success"`);
-                txReceipt = { status: 1, transactionHash: tx.hash, blockNumber: 'pending' };
+                const errorMsg = receiptError.message.toLowerCase();
+                
+                if (errorMsg.includes('transaction indexing is in progress')) {
+                    // Indexing in progress across all providers - transaction likely succeeded
+                    console.log(`tx_recovery="indexing_in_progress" hash=${tx.hash} action="treat_as_success" reason="indexing_lag"`);
+                    txReceipt = { status: 1, transactionHash: tx.hash, blockNumber: 'indexing' };
+                } else if (errorMsg.includes('all rpc endpoints failed')) {
+                    // All providers failed - but transaction was broadcast
+                    console.log(`tx_recovery="all_rpc_failed" hash=${tx.hash} action="treat_as_success" reason="broadcast_confirmed"`);
+                    txReceipt = { status: 1, transactionHash: tx.hash, blockNumber: 'rpc_failure' };
+                } else {
+                    console.log(`tx_recovery_failed="${receiptError.message}" hash=${tx.hash} action="treat_as_success" reason="signal_sent"`);
+                    txReceipt = { status: 1, transactionHash: tx.hash, blockNumber: 'error_recovery' };
+                }
             }
         }
 
@@ -837,6 +1030,7 @@ const nonceManager = {
 
         // ---- STATE UPDATE ----
         // The causal chain is extended. Persist the new state.
+        jamStore.saveSuccessfulJAM(hash, jam);
         systemState.lastHash = hash;
         systemState.metrics.emissionSuccesses++;
         const selectedPattern = jam.meta.pattern_type;
@@ -917,15 +1111,25 @@ const nonceManager = {
             console.error(`emit_err="transaction_reverted" action="check_contract_state"`);
             console.error(`revert_err_detail="${errorMsg.slice(0, 200)}"`);
             
-            // Check if DMAP contract is accessible
+            // Enhanced contract accessibility check using resilient RPC
             try {
-                const dmap = new ethers.Contract(process.env.DMAP_ADDRESS, [
-                    "function owner() external view returns (address)"
-                ], provider);
-                await dmap.owner();
-                console.log(`contract_check="dmap_accessible"`);
+                const ownerCall = await resilientRpcCall('eth_call', [
+                    {
+                        to: process.env.DMAP_ADDRESS,
+                        data: '0x8da5cb5b' // owner() function selector
+                    },
+                    'latest'
+                ]);
+                console.log(`contract_check="dmap_accessible" owner_call="success"`);
             } catch (contractErr) {
-                console.error(`contract_check="dmap_inaccessible" err="${contractErr.message}"`);
+                const errorMsg = contractErr.message.toLowerCase();
+                if (errorMsg.includes('transaction indexing is in progress')) {
+                    console.warn(`contract_check="indexing_in_progress" status="temporarily_unavailable"`);
+                } else if (errorMsg.includes('all rpc endpoints failed')) {
+                    console.error(`contract_check="all_rpc_failed" status="network_issues"`);
+                } else {
+                    console.error(`contract_check="dmap_inaccessible" err="${contractErr.message}"`);
+                }
             }
         } else {
             // Generic error handling
