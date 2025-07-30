@@ -13,7 +13,18 @@ const MIN_SIMILARITY_THRESHOLD = 0.8; // 80% pattern match required
 
 class AttributionMonitor {
     constructor() {
-        this.provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL || 'https://mainnet.base.org');
+        // Resilient RPC configuration for automatic failover - fully sovereign
+        this.RPC_URLS = [
+            process.env.RPC_URL || 'https://mainnet.base.org',
+            'https://base.llamarpc.com',
+            'https://1rpc.io/base',
+            'https://base-rpc.publicnode.com',
+            'https://base.gateway.tenderly.co'
+        ];
+        
+        this.currentRpcIndex = 0;
+        this.provider = null;
+        this.initializeProvider();
         this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         
         // Contract interfaces
@@ -34,16 +45,36 @@ class AttributionMonitor {
         this.loadHistoricalData();
     }
     
+    // Initialize provider with failover
+    initializeProvider() {
+        const rpcUrl = this.RPC_URLS[this.currentRpcIndex];
+        console.log(`attr_provider_init="starting" rpc="${rpcUrl}"`);
+        try {
+            this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+            console.log(`attr_provider_init="success" rpc="${rpcUrl}"`);
+        } catch (e) {
+            console.error(`attr_provider_init_err="${e.message}" rpc="${rpcUrl}"`);
+            this.currentRpcIndex = (this.currentRpcIndex + 1) % this.RPC_URLS.length;
+            this.initializeProvider();
+        }
+    }
+    
     // Main monitoring loop
     async startMonitoring() {
         console.log('attribution_monitor="starting" mode="recursive_yield_detection"');
         
-        // Check if we're authorized to attest
-        const isAuthorized = await this.signalVault.authorizedTrappers(this.wallet.address);
-        if (!isAuthorized) {
-            console.log('authorization="pending" action="self_authorize"');
-            // Self-authorize if not already
-            await this.signalVault.authorizeTrapper(this.wallet.address);
+        try {
+            // Check if we're authorized to attest
+            console.log('authorization_check="starting"');
+            const isAuthorized = await this.signalVault.authorizedTrappers(this.wallet.address);
+            console.log(`authorization_status="${isAuthorized}"`);
+            
+            if (!isAuthorized) {
+                console.log('authorization="pending" action="skip_vault_interaction"');
+                // Skip vault interaction for now to avoid hanging
+            }
+        } catch (authError) {
+            console.error(`authorization_error="${authError.message}"`);
         }
         
         // Load active signals from JAM store
@@ -126,6 +157,7 @@ class AttributionMonitor {
                 
                 for (const tx of block.transactions) {
                     // Skip our own transactions
+                    if (!tx || !tx.from) continue;
                     if (tx.from.toLowerCase() === this.wallet.address.toLowerCase()) continue;
                     
                     // Check if this transaction matches any active signal pattern
@@ -209,7 +241,7 @@ class AttributionMonitor {
                 pattern.actions = 'SWAP';
                 
                 // Check if value has PHI alignment
-                const valueEth = parseFloat(ethers.formatEther(tx.value));
+                const valueEth = parseFloat(ethers.utils.formatEther(tx.value));
                 pattern.hasPhiRatio = this.checkPhiAlignment(valueEth);
             }
         } catch (e) {
@@ -289,24 +321,26 @@ class AttributionMonitor {
             const currentYield = this.attributedYields.get(signalHash) || 0n;
             this.attributedYields.set(signalHash, currentYield + yieldAmount);
             
-            console.log(`yield_attributed="${ethers.formatEther(yieldAmount)}" signal="${signalHash.slice(0,10)}" bot="${frontrunner.slice(0,10)}" similarity="${similarity.toFixed(2)}"`);
+            console.log(`yield_attributed="${ethers.utils.formatEther(yieldAmount)}" signal="${signalHash.slice(0,10)}" bot="${frontrunner.slice(0,10)}" similarity="${similarity.toFixed(2)}"`);
             
-            // Save attribution record
+            const jamStore = require('./jam-store');
+            jamStore.recordInteraction(signalHash, frontrunner, ethers.utils.formatEther(yieldAmount));
+
+            // Save attribution record for local analysis
             this.saveAttribution({
                 timestamp: Date.now(),
                 signalHash,
                 frontrunner,
-                yieldAmount: ethers.formatEther(yieldAmount),
+                yieldAmount: ethers.utils.formatEther(yieldAmount),
                 similarity,
                 txHash: tx.hash
             });
             
             // Reinforce high-yield signals with strong similarity
-            const jamStore = require('./jam-store');
-            const yieldThreshold = ethers.parseEther('0.000001618'); // φ/1000000 ETH threshold
+            const yieldThreshold = ethers.utils.parseEther('0.000001618'); // φ/1000000 ETH threshold
             
             if (similarity > 0.9 && yieldAmount > yieldThreshold) {
-                const reinforced = jamStore.reinforceSignal(signalHash, parseFloat(ethers.formatEther(yieldAmount)));
+                const reinforced = jamStore.reinforceSignal(signalHash, parseFloat(ethers.utils.formatEther(yieldAmount)));
                 if (reinforced) {
                     console.log(`signal_reinforced="${signalHash.slice(0,10)}" trigger="high_yield" similarity="${similarity}"`);
                 }
@@ -351,7 +385,7 @@ class AttributionMonitor {
                     const currentYield = this.attributedYields.get(record.signalHash) || 0;
                     this.attributedYields.set(
                         record.signalHash, 
-                        currentYield + BigInt(ethers.parseEther(record.yieldAmount))
+                        currentYield + BigInt(ethers.utils.parseEther(record.yieldAmount))
                     );
                 }
                 console.log(`historical_attributions_loaded="${lines.length}"`);
@@ -375,10 +409,11 @@ class AttributionMonitor {
         
         return {
             ...stats,
-            totalYieldEth: ethers.formatEther(stats.totalYield),
+            totalYieldEth: ethers.utils.formatEther(stats.totalYield),
             avgYieldPerSignal: stats.attributedSignals > 0 
-                ? ethers.formatEther(stats.totalYield / BigInt(stats.attributedSignals))
-                : '0'
+                ? ethers.utils.formatEther(stats.totalYield / BigInt(stats.attributedSignals))
+                : '0',
+            totalYield: undefined // Remove BigInt for JSON serialization
         };
     }
 }
@@ -390,10 +425,14 @@ async function main() {
     // Start monitoring
     await monitor.startMonitoring();
     
-    // Print stats every minute
+    // Print stats every minute with error handling
     setInterval(() => {
-        const stats = monitor.getStats();
-        console.log(`attribution_stats="${JSON.stringify(stats)}"`);
+        try {
+            const stats = monitor.getStats();
+            console.log(`attribution_stats="${JSON.stringify(stats)}"`);
+        } catch (error) {
+            console.error(`stats_error="${error.message}"`);
+        }
     }, 60000);
     
     // Keep process alive
